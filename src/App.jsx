@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 
 // ═══════════════════════════════════════════════════════════════
-// 🎓 BULLES DE SAVOIR — Application Live v3c (Semaines vacances)
+// 🎓 BULLES DE SAVOIR — Application Live v3d (Stages Lun-Ven)
 // ═══════════════════════════════════════════════════════════════
 
 const SB_URL = "https://qkncmlmnbbgyjxqjpejm.supabase.co";
@@ -139,7 +139,7 @@ const CreneauModal = ({ open, onClose, creneau, refresh }) => {
   }, [creneau, open]);
   const save = async () => {
     setSaving(true);
-    const data = { ...form, capacite: parseInt(form.capacite), periode_vacances: form.type_creneau === "stage" ? form.periode_vacances : null, semaine_vacances: form.type_creneau === "stage" ? parseInt(form.semaine_vacances) : null };
+    const data = { ...form, capacite: parseInt(form.capacite), periode_vacances: form.type_creneau === "stage" ? form.periode_vacances : null, semaine_vacances: form.type_creneau === "stage" ? parseInt(form.semaine_vacances) : null, jour: form.type_creneau === "stage" ? "Lundi" : form.jour };
     if (creneau) await api.patch("creneaux", `id=eq.${creneau.id}`, data);
     else await api.post("creneaux", data);
     setSaving(false); onClose(); refresh();
@@ -158,16 +158,23 @@ const CreneauModal = ({ open, onClose, creneau, refresh }) => {
           <Input label="Semaine" value={form.semaine_vacances} onChange={v => setForm({...form, semaine_vacances: v})} options={[["1","Semaine 1"],["2","Semaine 2"]]} />
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-        <Input label="Jour" value={form.jour} onChange={v => setForm({...form, jour: v})} options={JOURS_ALL.map(j => [j, j])} />
-        <Input label="Début" value={form.heure_debut} onChange={v => setForm({...form, heure_debut: v})} type="time" />
-        <Input label="Fin" value={form.heure_fin} onChange={v => setForm({...form, heure_fin: v})} type="time" />
-      </div>
+      {isStage ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Input label="Début" value={form.heure_debut} onChange={v => setForm({...form, heure_debut: v})} type="time" />
+          <Input label="Fin" value={form.heure_fin} onChange={v => setForm({...form, heure_fin: v})} type="time" />
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+          <Input label="Jour" value={form.jour} onChange={v => setForm({...form, jour: v})} options={JOURS_ALL.map(j => [j, j])} />
+          <Input label="Début" value={form.heure_debut} onChange={v => setForm({...form, heure_debut: v})} type="time" />
+          <Input label="Fin" value={form.heure_fin} onChange={v => setForm({...form, heure_fin: v})} type="time" />
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <Input label="Mode" value={form.mode} onChange={v => setForm({...form, mode: v})} options={Object.entries(FORFAITS).map(([k,v]) => [k, `${v.l} (${v.t}€/h)`])} />
         <Input label="Capacité" value={form.capacite} onChange={v => setForm({...form, capacite: v})} type="number" />
       </div>
-      {isStage && <div style={{ background: C.orange+"15", borderRadius: 8, padding: 10, marginTop: 4, fontSize: 11, color: C.orange }}>🏕️ Ce créneau apparaîtra uniquement pendant la semaine {form.semaine_vacances} des vacances {PERIODES.find(p=>p[0]===form.periode_vacances)?.[1]||""}.</div>}
+      {isStage && <div style={{ background: C.orange+"15", borderRadius: 8, padding: 10, marginTop: 4, fontSize: 11, color: C.orange }}>🏕️ Ce créneau horaire apparaîtra <b>du lundi au vendredi</b> de la semaine {form.semaine_vacances} des vacances {PERIODES.find(p=>p[0]===form.periode_vacances)?.[1]||""}. L'appel se fait jour par jour dans le Planning.</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
         <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
         <Btn onClick={save} disabled={saving} color={isStage?C.orange:C.accent}>{saving?"...":creneau?"Modifier":"Créer"}</Btn>
@@ -191,7 +198,7 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
   const isStage = slot.type_creneau === "stage";
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
   return (
-    <Modal open={open} onClose={onClose} title={`${slot.jour} ${slot.heure_debut}-${slot.heure_fin}`} wide>
+    <Modal open={open} onClose={onClose} title={`${slot.type_creneau==="stage"?"Lun→Ven":slot.jour} ${slot.heure_debut}-${slot.heure_fin}`} wide>
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||slot.mode} · {tarifMode(slot.mode)}€/h</Badge>
         <Badge color={C.textMuted}>{students.length}/{slot.capacite} places</Badge>
@@ -271,7 +278,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
   const nextCourseSlots = useMemo(() => {
     const ctx = smart.ctx;
     const rel = ctx.type === "vacances"
-      ? creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === ctx.vacance?.id && cr.semaine_vacances === ctx.semaine && cr.jour === dayName)
+      ? creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === ctx.vacance?.id && cr.semaine_vacances === ctx.semaine)
       : creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dayName);
     return rel.map(cr => { const sts = affectations.filter(a => a.creneau_id === cr.id && a.actif).map(a => eleves.find(e => e.id === a.eleve_id)).filter(Boolean); return { ...cr, students: sts }; });
   }, [creneaux, affectations, eleves, smart, dayName]);
@@ -391,7 +398,8 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const daySlots = useMemo(() => {
     let rel;
     if (dateCtx.type === "vacances") {
-      rel = creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === dateCtx.vacance?.id && (cr.semaine_vacances === dateCtx.semaine || cr.semaine_vacances === null) && cr.jour === dayName);
+      // Stages: show ALL stage créneaux for this period+week on every weekday (ignore jour field)
+      rel = creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === dateCtx.vacance?.id && (cr.semaine_vacances === dateCtx.semaine || cr.semaine_vacances === null));
     } else {
       rel = creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dayName);
     }
@@ -534,7 +542,7 @@ const ElevesPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, p
       <Modal open={!!editing} onClose={() => { setEditing(null); setSelected(null); }} title={selected?`${selected.prenom} ${selected.nom}`:"Nouvel élève"} wide>
         {editing && (<div>
           {selected && (() => { const {facture,paye,solde,provisoire}=soldeEleve(selected.id); const crs=creneauxEleve(selected.id); return (<div style={{ marginBottom: 18 }}>
-            {crs.length>0&&<div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>{crs.map(cr => <Badge key={cr.id} color={cr.type_creneau==="stage"?C.orange:C.purple}>📅 {cr.jour} {(cr.heure_debut||"").substring(0,5)}-{(cr.heure_fin||"").substring(0,5)}{cr.type_creneau==="stage"?` (S${cr.semaine_vacances})`:""}</Badge>)}</div>}
+            {crs.length>0&&<div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>{crs.map(cr => <Badge key={cr.id} color={cr.type_creneau==="stage"?C.orange:C.purple}>📅 {cr.type_creneau==="stage"?"Lun→Ven":cr.jour} {(cr.heure_debut||"").substring(0,5)}-{(cr.heure_fin||"").substring(0,5)}{cr.type_creneau==="stage"?` (Stage S${cr.semaine_vacances})`:""}</Badge>)}</div>}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, background: C.surfaceLight, borderRadius: 10, padding: 12 }}>
               <div style={{ textAlign: "center" }}><div style={{ fontSize: 10, color: C.textMuted, fontWeight: 600 }}>FACTURÉ</div><div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>{facture>0?`${facture.toFixed(0)}€`:"—"}</div></div>
               <div style={{ textAlign: "center" }}><div style={{ fontSize: 10, color: C.textMuted, fontWeight: 600 }}>PAYÉ</div><div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{paye>0?`${paye.toFixed(0)}€`:"—"}</div></div>
@@ -593,7 +601,7 @@ const CreneauxPage = ({ creneaux, affectations, eleves, refresh }) => {
   const daysReg = useMemo(() => [...new Set(reguliers.map(cr => cr.jour))].sort((a,b) => JOURS_ALL.indexOf(a)-JOURS_ALL.indexOf(b)), [reguliers]);
   const groupedReg = useMemo(() => { const g = {}; daysReg.forEach(d => g[d]=[]); reguliers.forEach(cr => { if(g[cr.jour]) { const sts = affectations.filter(a => a.creneau_id===cr.id && a.actif).map(a => { const el = eleves.find(e => e.id===a.eleve_id); return el?{...el,type_inscription:a.type_inscription,affectation_id:a.id}:null; }).filter(Boolean); g[cr.jour].push({...cr,students:sts}); } }); return g; }, [reguliers, affectations, eleves, daysReg]);
 
-  const groupedStage = useMemo(() => { const g = {}; stages.forEach(cr => { const pk = `${cr.periode_vacances}_S${cr.semaine_vacances||1}`; if(!g[pk]) g[pk] = { periode: cr.periode_vacances, semaine: cr.semaine_vacances||1, days: {} }; if(!g[pk].days[cr.jour]) g[pk].days[cr.jour]=[]; const sts = affectations.filter(a => a.creneau_id===cr.id && a.actif).map(a => { const el = eleves.find(e => e.id===a.eleve_id); return el?{...el,type_inscription:a.type_inscription,affectation_id:a.id}:null; }).filter(Boolean); g[pk].days[cr.jour].push({...cr,students:sts}); }); return g; }, [stages, affectations, eleves]);
+  const groupedStage = useMemo(() => { const g = {}; stages.forEach(cr => { const pk = `${cr.periode_vacances}_S${cr.semaine_vacances||1}`; if(!g[pk]) g[pk] = { periode: cr.periode_vacances, semaine: cr.semaine_vacances||1, slots: [] }; const sts = affectations.filter(a => a.creneau_id===cr.id && a.actif).map(a => { const el = eleves.find(e => e.id===a.eleve_id); return el?{...el,type_inscription:a.type_inscription,affectation_id:a.id}:null; }).filter(Boolean); g[pk].slots.push({...cr,students:sts}); }); return g; }, [stages, affectations, eleves]);
 
   const deleteCreneau = async (crId) => { if(confirm("Supprimer ce créneau ?")) { await api.del("affectations_creneaux",`creneau_id=eq.${crId}`); await api.del("creneaux",`id=eq.${crId}`); refresh(); } };
 
@@ -637,11 +645,22 @@ const CreneauxPage = ({ creneaux, affectations, eleves, refresh }) => {
           const plabel = PERIODES.find(p => p[0]===grp.periode)?.[1]||grp.periode;
           return (<div key={key} style={{ marginBottom: 20 }}>
             <div style={{ background: C.orange+"15", border: `1px solid ${C.orange}33`, borderRadius: 10, padding: "8px 14px", marginBottom: 10, fontWeight: 700, color: C.orange, fontSize: 14 }}>{plabel} — Semaine {grp.semaine}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
-              {["Lundi","Mardi","Mercredi","Jeudi","Vendredi"].map(day => (<div key={day}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, textAlign: "center", marginBottom: 6 }}>{day}</div>
-                {(grp.days[day]||[]).map(slot => <SlotCard key={slot.id} slot={slot} />)}
-              </div>))}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+              {grp.slots.map(slot => (
+                <div key={slot.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, borderLeft: `3px solid ${C.orange}`, cursor: "pointer" }} onClick={() => setSlotDetail(slot)}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{(slot.heure_debut||"").substring(0,5)}-{(slot.heure_fin||"").substring(0,5)}</span>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <Badge color={C.orange}>Lun→Ven</Badge>
+                      <button onClick={e => { e.stopPropagation(); setEditCr(slot); }} style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 12 }}>✏️</button>
+                      <button onClick={e => { e.stopPropagation(); deleteCreneau(slot.id); }} style={{ background: "none", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, opacity: 0.5 }}>🗑️</button>
+                    </div>
+                  </div>
+                  <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarifMode(slot.mode)}€/h</Badge>
+                  <div style={{ display: "flex", gap: 2, margin: "8px 0 4px" }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 3, borderRadius: 2, background: j<slot.students.length?C.orange:C.surfaceLight }} />)}</div>
+                  <div style={{ fontSize: 10, color: C.textDim }}>{slot.students.length}/{slot.capacite} inscrits — cliquer pour détails</div>
+                </div>
+              ))}
             </div>
           </div>);
         })
