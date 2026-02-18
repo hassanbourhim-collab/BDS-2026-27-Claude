@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 
 // ═══════════════════════════════════════════════════════════════
-// 🎓 BULLES DE SAVOIR — Application Live v3d (Stages Lun-Ven)
+// 🎓 BULLES DE SAVOIR — Application Live v3e (Inscription jours stage)
 // ═══════════════════════════════════════════════════════════════
 
 const SB_URL = "https://qkncmlmnbbgyjxqjpejm.supabase.co";
@@ -30,6 +30,7 @@ const MOIS_ORDER = ["Août","Septembre","Octobre","Novembre","Décembre","Janvie
 const JOURS_SEMAINE = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
 const JOURS_ALL = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
 const PERIODES = [["toussaint","🍂 Toussaint"],["noel","🎄 Noël"],["hiver","❄️ Hiver"],["printemps","🌸 Printemps"]];
+const JOURS_STAGE = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi"];
 
 // ═══ VACANCES ZONE B 2025-2026 (Lun-Ven uniquement, samedis = hors vacances) ═══
 const VACANCES_2526 = [
@@ -187,24 +188,47 @@ const CreneauModal = ({ open, onClose, creneau, refresh }) => {
 const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh }) => {
   const [addEleve, setAddEleve] = useState("");
   const [addType, setAddType] = useState("abonne");
+  const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true)); // all checked by default
   if (!open || !slot) return null;
-  const students = affectations.filter(a => a.creneau_id === slot.id && a.actif).map(a => { const el = eleves.find(e => e.id === a.eleve_id); return el ? { ...el, affectation_id: a.id, type_inscription: a.type_inscription } : null; }).filter(Boolean);
+  const isStage = slot.type_creneau === "stage";
+  const allAffs = affectations.filter(a => a.creneau_id === slot.id && a.actif);
+  const students = allAffs.map(a => { const el = eleves.find(e => e.id === a.eleve_id); return el ? { ...el, affectation_id: a.id, type_inscription: a.type_inscription, jours_stage: a.jours_stage } : null; }).filter(Boolean);
+
+  // Per-day count for stages
+  const jourCounts = isStage ? JOURS_STAGE.map(j => allAffs.filter(a => !a.jours_stage || a.jours_stage.includes(j)).length) : [];
+
   const removeStudent = async (affId) => { await api.del("affectations_creneaux", `id=eq.${affId}`); refresh(); };
   const addStudent = async () => {
     if (!addEleve) return;
-    await api.post("affectations_creneaux", { eleve_id: addEleve, creneau_id: slot.id, type_inscription: addType, actif: true });
-    setAddEleve(""); refresh();
+    const joursStr = isStage ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
+    await api.post("affectations_creneaux", { eleve_id: addEleve, creneau_id: slot.id, type_inscription: isStage ? "stage" : addType, actif: true, jours_stage: joursStr });
+    setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); refresh();
   };
-  const isStage = slot.type_creneau === "stage";
+
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
+  const canAdd = isStage ? addJours.some(Boolean) : true;
+
   return (
-    <Modal open={open} onClose={onClose} title={`${slot.type_creneau==="stage"?"Lun→Ven":slot.jour} ${slot.heure_debut}-${slot.heure_fin}`} wide>
+    <Modal open={open} onClose={onClose} title={`${isStage?"Lun→Ven":slot.jour} ${(slot.heure_debut||"").substring(0,5)}-${(slot.heure_fin||"").substring(0,5)}`} wide>
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
         <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||slot.mode} · {tarifMode(slot.mode)}€/h</Badge>
-        <Badge color={C.textMuted}>{students.length}/{slot.capacite} places</Badge>
         {isStage && <Badge color={C.orange}>Stage {periodeLabel} — S{slot.semaine_vacances}</Badge>}
-        {!isStage && <Badge color={C.accent}>Régulier</Badge>}
+        {!isStage && <><Badge color={C.accent}>Régulier</Badge><Badge color={C.textMuted}>{students.length}/{slot.capacite} places</Badge></>}
       </div>
+
+      {/* Per-day occupancy for stages */}
+      {isStage && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+          {JOURS_STAGE.map((j, i) => {
+            const full = jourCounts[i] >= slot.capacite;
+            return (<div key={j} style={{ flex: 1, textAlign: "center", padding: "6px 4px", borderRadius: 8, background: full ? C.danger+"22" : C.surfaceLight, border: `1px solid ${full ? C.danger+"44" : C.border}` }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: full ? C.danger : C.textMuted }}>{j.substring(0,3)}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: full ? C.danger : C.text }}>{jourCounts[i]}/{slot.capacite}</div>
+            </div>);
+          })}
+        </div>
+      )}
+
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 8 }}>ÉLÈVES INSCRITS ({students.length})</div>
         {students.length === 0 ? <div style={{ color: C.textDim, fontSize: 12 }}>Aucun élève inscrit</div> :
@@ -213,23 +237,43 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{st.prenom} {st.nom}</span>
                 <Badge color={C.purple}>{st.classe}</Badge>
-                {st.type_inscription === "occasionnel" && <Badge color={C.warning}>Occ.</Badge>}
+                {isStage && st.jours_stage && <span style={{ fontSize: 10, color: C.orange }}>{st.jours_stage.split(",").map(j => j.substring(0,3)).join(" · ")}</span>}
+                {!isStage && st.type_inscription === "occasionnel" && <Badge color={C.warning}>Occ.</Badge>}
               </div>
               <button onClick={() => removeStudent(st.affectation_id)} style={{ background: "none", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, opacity: 0.6 }}>✕ Retirer</button>
             </div>
           ))
         }
       </div>
-      {students.length < slot.capacite && (
-        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 8 }}>INSCRIRE UN ÉLÈVE</div>
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: 8, alignItems: "end" }}>
-            <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif && !students.find(s => s.id === e.id)).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
-            <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
-            <div style={{ marginBottom: 12 }}><Btn onClick={addStudent} disabled={!addEleve} color={C.success} small>+ Inscrire</Btn></div>
+
+      {/* Add student */}
+      <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 8 }}>INSCRIRE UN ÉLÈVE</div>
+        <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif && !students.find(s => s.id === e.id)).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
+
+        {isStage ? (
+          <div>
+            <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6, fontWeight: 600 }}>Jours de présence</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              {JOURS_STAGE.map((j, i) => {
+                const full = jourCounts[i] >= slot.capacite;
+                const checked = addJours[i] && !full;
+                return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "8px 4px", borderRadius: 8, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
+                  <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange }} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
+                  {full && <span style={{ fontSize: 9, color: C.danger }}>Complet</span>}
+                </label>);
+              })}
+            </div>
           </div>
+        ) : (
+          <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <Btn onClick={addStudent} disabled={!addEleve || !canAdd} color={C.success} small>+ Inscrire</Btn>
         </div>
-      )}
+      </div>
     </Modal>
   );
 };
@@ -381,6 +425,14 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const [addingTo, setAddingTo] = useState(null);
   const [addEleve, setAddEleve] = useState("");
   const [addType, setAddType] = useState("occasionnel");
+  const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
+
+  // Per-day counts for stage slot being added to
+  const addingJourCounts = useMemo(() => {
+    if (!addingTo || addingTo.type_creneau !== "stage") return [];
+    const affs = affectations.filter(a => a.creneau_id === addingTo.id && a.actif);
+    return JOURS_STAGE.map(j => affs.filter(a => !a.jours_stage || a.jours_stage.includes(j)).length);
+  }, [addingTo, affectations]);
 
   const dayName = useMemo(() => JOURS_SEMAINE[new Date(selectedDate).getDay()], [selectedDate]);
   const dateCtx = useMemo(() => getDateContext(selectedDate), [selectedDate]);
@@ -405,7 +457,11 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
     }
     return rel.map(cr => {
       const assigned = affectations.filter(a => a.creneau_id === cr.id && a.actif);
-      const students = assigned.map(a => { const el = eleves.find(e => e.id === a.eleve_id); const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id); return el ? { ...el, type_inscription: a.type_inscription, presence: pres, affectation_id: a.id } : null; }).filter(Boolean);
+      const students = assigned.map(a => {
+        // For stages: only show students enrolled for this specific day
+        if (cr.type_creneau === "stage" && a.jours_stage && !a.jours_stage.includes(dayName)) return null;
+        const el = eleves.find(e => e.id === a.eleve_id); const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id); return el ? { ...el, type_inscription: a.type_inscription, presence: pres, affectation_id: a.id, jours_stage: a.jours_stage } : null;
+      }).filter(Boolean);
       return { ...cr, students, dur: slotDur(cr) };
     });
   }, [creneaux, affectations, eleves, dayName, localPresences, dateCtx]);
@@ -414,7 +470,13 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const markAbsent = async (eid, cid, m) => { setSaving(true); await api.post("presences", { eleve_id: eid, date_cours: selectedDate, creneau_id: cid, statut: m, heures: 0 }); await loadPresences(); setSaving(false); };
   const removePresence = async (pid) => { await api.del("presences", `id=eq.${pid}`); await loadPresences(); };
   const markAllPresent = async (slot) => { setSaving(true); for (const st of slot.students) { if (!st.presence) await api.post("presences", { eleve_id: st.id, date_cours: selectedDate, creneau_id: slot.id, statut: "present", heures: slot.dur }); } await loadPresences(); setSaving(false); };
-  const addOcc = async () => { if (!addEleve || !addingTo) return; await api.post("affectations_creneaux", { eleve_id: addEleve, creneau_id: addingTo.id, type_inscription: addType, actif: true }); setAddingTo(null); setAddEleve(""); refresh(); };
+  const addOcc = async () => {
+    if (!addEleve || !addingTo) return;
+    const isStageSlot = addingTo.type_creneau === "stage";
+    const joursStr = isStageSlot ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
+    await api.post("affectations_creneaux", { eleve_id: addEleve, creneau_id: addingTo.id, type_inscription: isStageSlot ? "stage" : addType, actif: true, jours_stage: joursStr });
+    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); refresh();
+  };
 
   const stats = useMemo(() => { let t=0,p=0,a=0,pe=0; daySlots.forEach(s => s.students.forEach(st => { t++; if(st.presence){st.presence.statut==="present"?p++:a++;}else pe++; })); return { t,p,a,pe }; }, [daySlots]);
 
@@ -463,12 +525,12 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontWeight: 700, fontSize: 16, color: C.text }}>{(slot.heure_debut||"").substring(0,5)} — {(slot.heure_fin||"").substring(0,5)}</span>
                     <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarif}€/h</Badge>
-                    <Badge color={C.textMuted}>{slot.students.length}/{slot.capacite}</Badge>
-                    {slot.type_creneau==="stage" && <Badge color={C.orange}>Stage S{slot.semaine_vacances}</Badge>}
+                    <Badge color={C.textMuted}>{slot.students.length}/{slot.capacite} {dateCtx.type==="vacances"?dayName.substring(0,3):""}</Badge>
+                    {slot.type_creneau==="stage" && <Badge color={C.orange}>Stage S{slot.semaine_vacances} · {dayName}</Badge>}
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
                     {!allDone && slot.students.length > 0 && <Btn small color={C.success} onClick={() => markAllPresent(slot)} title="Tous présents">✓ Tous</Btn>}
-                    {slot.students.length < slot.capacite && <Btn small color={C.purple} outline onClick={() => { setAddingTo(slot); setAddEleve(""); }}>+ Élève</Btn>}
+                    {slot.students.length < slot.capacite && <Btn small color={C.purple} outline onClick={() => { setAddingTo(slot); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); }}>+ Élève</Btn>}
                     {allDone && slot.students.length > 0 && <Badge color={C.success}>✅ Terminé</Badge>}
                   </div>
                 </div>
@@ -478,7 +540,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
                     const ml = p?(p.statut==="present"?"Présent":p.statut==="absent_justifie"?"Abs. justifié":"Abs. non justifié"):"";
                     return (
                       <div key={st.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: 8, background: isP?C.success+"11":isA?C.danger+"11":C.surfaceLight, border: `1px solid ${isP?C.success+"33":isA?C.danger+"33":"transparent"}` }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{st.prenom} {st.nom}</span>{st.type_inscription==="occasionnel"&&<Badge color={C.warning}>Occ.</Badge>}<span style={{ fontSize: 10, color: C.textDim }}>{st.classe}</span></div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{st.prenom} {st.nom}</span>{st.jours_stage && st.jours_stage.split(",").length < 5 && <span style={{ fontSize: 9, color: C.orange }}>{st.jours_stage.split(",").length}j</span>}{st.type_inscription==="occasionnel"&&<Badge color={C.warning}>Occ.</Badge>}<span style={{ fontSize: 10, color: C.textDim }}>{st.classe}</span></div>
                         <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                           {p ? (<><Badge color={isP?C.success:C.danger}>{ml}</Badge>{isP&&<span style={{ fontSize: 10, color: C.success }}>{(tarif*slot.dur).toFixed(0)}€</span>}<button onClick={() => removePresence(p.id)} title="Annuler" style={{ background: "none", border: "none", color: C.textDim, fontSize: 12, cursor: "pointer" }}>↩</button></>
                           ) : (<><Btn small onClick={() => markPresent(st.id, slot.id, slot.dur)} color={C.success} title="PRÉSENT — facturé">✓</Btn><Btn small onClick={() => markAbsent(st.id, slot.id, "absent_justifie")} color={C.warning} outline title="Absent justifié — non facturé">🏥</Btn><Btn small onClick={() => markAbsent(st.id, slot.id, "absent_non_justifie")} color={C.danger} outline title="Absent non justifié — facturé">❌</Btn></>)}
@@ -492,13 +554,38 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
         </div>
       )}
 
-      <Modal open={!!addingTo} onClose={() => setAddingTo(null)} title={`Ajouter à ${addingTo?.heure_debut}-${addingTo?.heure_fin}`}>
-        {addingTo && (<div>
-          <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
-          <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}><Btn onClick={() => setAddingTo(null)} color={C.textMuted} outline>Annuler</Btn><Btn onClick={addOcc} disabled={!addEleve}>Ajouter</Btn></div>
-        </div>)}
+      <Modal open={!!addingTo} onClose={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); }} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
+        {addingTo && (() => {
+          const isStageSlot = addingTo.type_creneau === "stage";
+          const canAddStage = isStageSlot ? addJours.some((v, i) => v && addingJourCounts[i] < addingTo.capacite) : true;
+          return (<div>
+            <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
+            {isStageSlot ? (
+              <div>
+                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6, fontWeight: 600 }}>Jours de présence</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                  {JOURS_STAGE.map((j, i) => {
+                    const full = addingJourCounts[i] >= addingTo.capacite;
+                    const checked = addJours[i] && !full;
+                    return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "8px 4px", borderRadius: 8, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
+                      <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange }} />
+                      <span style={{ fontSize: 11, fontWeight: 600, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
+                      <span style={{ fontSize: 9, color: full ? C.danger : C.textDim }}>{addingJourCounts[i]}/{addingTo.capacite}</span>
+                    </label>);
+                  })}
+                </div>
+              </div>
+            ) : (
+              <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+              <Btn onClick={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); }} color={C.textMuted} outline>Annuler</Btn>
+              <Btn onClick={addOcc} disabled={!addEleve || !canAddStage}>Ajouter</Btn>
+            </div>
+          </div>);
+        })()}
       </Modal>
+      <SlotDetailModal open={!!slotDetail} onClose={() => setSlotDetail(null)} slot={slotDetail} eleves={eleves} affectations={affectations} refresh={() => { refresh(); loadPresences(); }} />
     </div>
   );
 };
