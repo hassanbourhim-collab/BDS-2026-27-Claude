@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 
 // ═══════════════════════════════════════════════════════════════
-// 🎓 BULLES DE SAVOIR — Application Live v3e (Inscription jours stage)
+// 🎓 BULLES DE SAVOIR — Application Live v4 (Palette colorée)
 // ═══════════════════════════════════════════════════════════════
 
 const SB_URL = "https://qkncmlmnbbgyjxqjpejm.supabase.co";
@@ -15,16 +15,44 @@ const api = {
   del: async (t, filter) => { const r = await fetch(`${SB_URL}/rest/v1/${t}?${filter}`, { method: "DELETE", headers: hdrs }); return r.ok; },
 };
 
-// ═══ CONSTANTS ═══
+// ═══ NOUVELLE PALETTE COLORÉE (style ENT / Google Sheet) ═══
 const C = {
-  bg: "#0B0F1A", surface: "#111827", surfaceLight: "#1F2937", border: "#374151",
-  accent: "#3B82F6", accentLight: "#60A5FA", accentDark: "#1D4ED8",
-  success: "#10B981", warning: "#F59E0B", danger: "#EF4444",
-  text: "#F9FAFB", textMuted: "#9CA3AF", textDim: "#6B7280",
-  gold: "#F59E0B", purple: "#8B5CF6", pink: "#EC4899", orange: "#F97316",
+  // Fond et surfaces
+  bg: "#F5F7FA",           // Gris très clair
+  surface: "#FFFFFF",       // Blanc
+  surfaceLight: "#F0F4F8",  // Gris clair pour hover
+  border: "#E0E6ED",        // Bordure gris clair
+  
+  // Couleurs principales
+  accent: "#00BCD4",        // Cyan (boutons, liens)
+  accentLight: "#4DD0E1",   // Cyan clair
+  accentDark: "#0097A7",    // Cyan foncé
+  
+  // Couleurs sémantiques
+  success: "#4CAF50",       // Vert vif
+  warning: "#FF9800",       // Orange
+  danger: "#F44336",        // Rouge
+  
+  // Texte
+  text: "#333333",          // Texte principal
+  textMuted: "#666666",     // Texte secondaire
+  textDim: "#999999",       // Texte tertiaire
+  
+  // Couleurs d'accent supplémentaires
+  gold: "#FFC107",          // Jaune/Or
+  purple: "#9C27B0",        // Violet
+  pink: "#E91E63",          // Rose/Magenta (sidebar)
+  orange: "#FF9800",        // Orange (stages)
+  blue: "#03A9F4",          // Bleu ciel (headers)
+  
+  // Sidebar
+  sidebarBg: "#E91E63",     // Rose/Magenta
+  sidebarText: "#FFFFFF",   // Blanc
+  sidebarHover: "#C2185B",  // Rose foncé
 };
+
 const CLASSES = ["6ème","5ème","4ème","3ème","2nde","1ère","Tle","PostBac"];
-const FORFAITS = { groupe: { l: "Groupe", c: C.accent, t: 15 }, individuel: { l: "Individuel", c: C.gold, t: 35 }, Triple: { l: "Triple", c: C.purple, t: 20 }, double: { l: "Double", c: C.pink, t: 25 }, stage: { l: "Stage", c: C.orange, t: 15 } };
+const FORFAITS = { groupe: { l: "Groupe", c: C.blue, t: 15 }, individuel: { l: "Individuel", c: C.gold, t: 35 }, Triple: { l: "Triple", c: C.purple, t: 20 }, double: { l: "Double", c: C.pink, t: 25 }, stage: { l: "Stage", c: C.orange, t: 15 } };
 const MOIS_LABELS = { "Août":"Août","Septembre":"Sept","Octobre":"Oct","Novembre":"Nov","Décembre":"Déc","Janvier":"Jan","Février":"Fév","Mars":"Mars","Avril":"Avr","Mai":"Mai","Juin":"Juin","Juillet":"Juil" };
 const MOIS_ORDER = ["Août","Septembre","Octobre","Novembre","Décembre","Janvier","Février","Mars","Avril","Mai","Juin","Juillet"];
 const JOURS_SEMAINE = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
@@ -32,7 +60,7 @@ const JOURS_ALL = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
 const PERIODES = [["toussaint","🍂 Toussaint"],["noel","🎄 Noël"],["hiver","❄️ Hiver"],["printemps","🌸 Printemps"]];
 const JOURS_STAGE = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi"];
 
-// ═══ VACANCES ZONE B 2025-2026 (Lun-Ven uniquement, samedis = hors vacances) ═══
+// ═══ VACANCES ZONE B 2025-2026 ═══
 const VACANCES_2526 = [
   { id: "toussaint", label: "🍂 Toussaint", s1d: "2025-10-20", s1f: "2025-10-24", s2d: "2025-10-27", s2f: "2025-10-31", samMilieu: "2025-10-25" },
   { id: "noel",      label: "🎄 Noël",      s1d: "2025-12-22", s1f: "2025-12-26", s2d: "2025-12-29", s2f: "2026-01-02", samMilieu: "2025-12-27" },
@@ -71,38 +99,43 @@ const slotDur = (cr) => { if (!cr.heure_debut || !cr.heure_fin) return 2; const 
 
 // ═══ UI COMPONENTS ═══
 const Badge = ({ children, color = C.accent, onClick, title }) => (
-  <span onClick={onClick} title={title} style={{ display: "inline-flex", padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: color + "22", color, whiteSpace: "nowrap", cursor: onClick ? "pointer" : "default" }}>{children}</span>
+  <span onClick={onClick} title={title} style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: color + "22", color, whiteSpace: "nowrap", cursor: onClick ? "pointer" : "default" }}>{children}</span>
 );
+
 const KPI = ({ icon, label, value, sub, color = C.accent, onClick }) => (
-  <div onClick={onClick} style={{ background: `linear-gradient(135deg, ${C.surface}, ${C.surfaceLight})`, border: `1px solid ${C.border}`, borderRadius: 16, padding: "18px 22px", position: "relative", overflow: "hidden", cursor: onClick ? "pointer" : "default", transition: "all 0.2s" }}
-    onMouseEnter={e => { if(onClick) { e.currentTarget.style.borderColor = color; e.currentTarget.style.transform = "translateY(-2px)"; } }}
-    onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.transform = "none"; }}>
-    <div style={{ position: "absolute", top: -10, right: -10, width: 70, height: 70, borderRadius: "50%", background: color + "08" }} />
-    <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
-    <div style={{ fontSize: 10, color: C.textMuted, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600, marginBottom: 3 }}>{label}</div>
-    <div style={{ fontSize: 26, fontWeight: 800, color: C.text }}>{value}</div>
+  <div onClick={onClick} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: "18px 22px", position: "relative", overflow: "hidden", cursor: onClick ? "pointer" : "default", transition: "all 0.2s", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}
+    onMouseEnter={e => { if(onClick) { e.currentTarget.style.borderColor = color; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.08)"; } }}
+    onMouseLeave={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)"; }}>
+    <div style={{ position: "absolute", top: -10, right: -10, width: 70, height: 70, borderRadius: "50%", background: color + "15" }} />
+    <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
+    <div style={{ fontSize: 10, color: C.textMuted, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 3 }}>{label}</div>
+    <div style={{ fontSize: 28, fontWeight: 800, color: C.text }}>{value}</div>
     {sub && <div style={{ fontSize: 12, color: C.textMuted, marginTop: 3 }}>{sub}</div>}
-    {onClick && <div style={{ fontSize: 10, color, marginTop: 4 }}>Cliquer pour détails →</div>}
+    {onClick && <div style={{ fontSize: 10, color, marginTop: 4, fontWeight: 600 }}>Cliquer pour détails →</div>}
   </div>
 );
+
 const Btn = ({ children, onClick, color = C.accent, small, disabled, outline, title }) => (
-  <button onClick={onClick} disabled={disabled} title={title} style={{ padding: small ? "5px 12px" : "9px 18px", borderRadius: 8, border: outline ? `1px solid ${color}` : "none", background: outline ? "transparent" : disabled ? C.surfaceLight : color, color: outline ? color : "#fff", fontSize: small ? 12 : 13, fontWeight: 600, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1, transition: "all 0.15s" }}>{children}</button>
+  <button onClick={onClick} disabled={disabled} title={title} style={{ padding: small ? "6px 14px" : "10px 20px", borderRadius: 8, border: outline ? `2px solid ${color}` : "none", background: outline ? "transparent" : disabled ? C.surfaceLight : color, color: outline ? color : "#fff", fontSize: small ? 12 : 13, fontWeight: 700, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1, transition: "all 0.15s", boxShadow: outline ? "none" : "0 2px 4px rgba(0,0,0,0.1)" }}>{children}</button>
 );
+
 const Input = ({ label, value, onChange, type = "text", options, placeholder }) => (
-  <div style={{ marginBottom: 12 }}>
-    {label && <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 4, fontWeight: 600 }}>{label}</div>}
-    {options ? <select value={value} onChange={e => onChange(e.target.value)} style={{ width: "100%", padding: "9px 12px", background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13 }}>{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-    : <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={{ width: "100%", padding: "9px 12px", background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13, boxSizing: "border-box" }} />}
+  <div style={{ marginBottom: 14 }}>
+    {label && <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 5, fontWeight: 700 }}>{label}</div>}
+    {options ? <select value={value} onChange={e => onChange(e.target.value)} style={{ width: "100%", padding: "10px 14px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 14 }}>{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+    : <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={{ width: "100%", padding: "10px 14px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 14, boxSizing: "border-box" }} />}
   </div>
 );
+
 const Modal = ({ open, onClose, title, children, wide }) => {
   if (!open) return null;
-  return (<div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
-    <div onClick={e => e.stopPropagation()} style={{ background: C.surface, borderRadius: 16, border: `1px solid ${C.border}`, maxWidth: wide ? 800 : 550, width: "100%", maxHeight: "85vh", overflow: "auto", padding: 28 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: C.text }}>{title}</h3>
-        <button onClick={onClose} style={{ background: "none", border: "none", color: C.textMuted, fontSize: 20, cursor: "pointer" }}>✕</button>
-      </div>{children}
+  return (<div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+    <div onClick={e => e.stopPropagation()} style={{ background: C.surface, borderRadius: 20, border: `1px solid ${C.border}`, maxWidth: wide ? 800 : 550, width: "100%", maxHeight: "85vh", overflow: "auto", padding: 0, boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", borderBottom: `1px solid ${C.border}`, background: C.pink, borderRadius: "20px 20px 0 0" }}>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#fff" }}>{title}</h3>
+        <button onClick={onClose} style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", fontSize: 18, cursor: "pointer", width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+      </div>
+      <div style={{ padding: 24 }}>{children}</div>
     </div>
   </div>);
 };
@@ -117,20 +150,20 @@ const PaymentModal = ({ open, onClose, eleves, preselectedEleve, refresh }) => {
     <Modal open={open} onClose={onClose} title="💳 Enregistrer un règlement">
       <Input label="Élève" value={form.eleve_id} onChange={v => setForm({...form, eleve_id: v})} options={[["", "— Choisir —"], ...eleves.filter(e=>e.actif).sort((a,b)=>a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom}`])]} />
       <Input label="Montant (€)" value={form.montant} onChange={v => setForm({...form, montant: v})} type="number" placeholder="Ex: 120" />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Input label="Mode" value={form.mode_paiement} onChange={v => setForm({...form, mode_paiement: v})} options={[["especes","💵 Espèces"],["cheque","📝 Chèque"],["virement","🏦 Virement"],["CB","💳 CB"]]} />
         <Input label="Mois concerné" value={form.mois_concerne} onChange={v => setForm({...form, mois_concerne: v})} options={[["","— Optionnel —"],...MOIS_ORDER.map(m => [m,m])]} />
       </div>
       <Input label="Commentaire" value={form.commentaire} onChange={v => setForm({...form, commentaire: v})} placeholder="Ex: Chèque n°1234" />
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
         <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
-        <Btn onClick={save} disabled={saving || !form.eleve_id || !form.montant} color={C.success}>{saving ? "..." : "Enregistrer"}</Btn>
+        <Btn onClick={save} disabled={saving || !form.eleve_id || !form.montant} color={C.success}>{saving ? "..." : "✓ Enregistrer"}</Btn>
       </div>
     </Modal>
   );
 };
 
-// ═══ CRÉNEAU MODAL (create/edit) ═══
+// ═══ CRÉNEAU MODAL ═══
 const CreneauModal = ({ open, onClose, creneau, refresh }) => {
   const [form, setForm] = useState({ jour: "Lundi", heure_debut: "16:00", heure_fin: "17:00", mode: "groupe", capacite: 6, type_creneau: "regulier", periode_vacances: null, semaine_vacances: 1 });
   const [saving, setSaving] = useState(false);
@@ -148,35 +181,35 @@ const CreneauModal = ({ open, onClose, creneau, refresh }) => {
   const isStage = form.type_creneau === "stage";
   return (
     <Modal open={open} onClose={onClose} title={creneau ? "✏️ Modifier créneau" : "➕ Nouveau créneau"}>
-      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
         {[["regulier","📅 Régulier"],["stage","🏕️ Stage"]].map(([k,l]) => (
-          <div key={k} onClick={() => setForm({...form, type_creneau: k})} style={{ flex: 1, padding: 10, borderRadius: 8, textAlign: "center", cursor: "pointer", border: `2px solid ${form.type_creneau===k?(k==="stage"?C.orange:C.accent):C.border}`, background: form.type_creneau===k?(k==="stage"?C.orange:C.accent)+"15":"transparent", color: form.type_creneau===k?C.text:C.textMuted, fontWeight: 600, fontSize: 13 }}>{l}</div>
+          <div key={k} onClick={() => setForm({...form, type_creneau: k})} style={{ flex: 1, padding: 12, borderRadius: 10, textAlign: "center", cursor: "pointer", border: `2px solid ${form.type_creneau===k?(k==="stage"?C.orange:C.accent):C.border}`, background: form.type_creneau===k?(k==="stage"?C.orange:C.accent)+"15":"transparent", color: form.type_creneau===k?C.text:C.textMuted, fontWeight: 700, fontSize: 14 }}>{l}</div>
         ))}
       </div>
       {isStage && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Input label="Période" value={form.periode_vacances||"toussaint"} onChange={v => setForm({...form, periode_vacances: v})} options={PERIODES} />
           <Input label="Semaine" value={form.semaine_vacances} onChange={v => setForm({...form, semaine_vacances: v})} options={[["1","Semaine 1"],["2","Semaine 2"]]} />
         </div>
       )}
       {isStage ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Input label="Début" value={form.heure_debut} onChange={v => setForm({...form, heure_debut: v})} type="time" />
           <Input label="Fin" value={form.heure_fin} onChange={v => setForm({...form, heure_fin: v})} type="time" />
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <Input label="Jour" value={form.jour} onChange={v => setForm({...form, jour: v})} options={JOURS_ALL.map(j => [j, j])} />
           <Input label="Début" value={form.heure_debut} onChange={v => setForm({...form, heure_debut: v})} type="time" />
           <Input label="Fin" value={form.heure_fin} onChange={v => setForm({...form, heure_fin: v})} type="time" />
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Input label="Mode" value={form.mode} onChange={v => setForm({...form, mode: v})} options={Object.entries(FORFAITS).map(([k,v]) => [k, `${v.l} (${v.t}€/h)`])} />
         <Input label="Capacité" value={form.capacite} onChange={v => setForm({...form, capacite: v})} type="number" />
       </div>
-      {isStage && <div style={{ background: C.orange+"15", borderRadius: 8, padding: 10, marginTop: 4, fontSize: 11, color: C.orange }}>🏕️ Ce créneau horaire apparaîtra <b>du lundi au vendredi</b> de la semaine {form.semaine_vacances} des vacances {PERIODES.find(p=>p[0]===form.periode_vacances)?.[1]||""}. L'appel se fait jour par jour dans le Planning.</div>}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+      {isStage && <div style={{ background: C.orange+"15", borderRadius: 10, padding: 12, marginTop: 6, fontSize: 12, color: C.orange, border: `1px solid ${C.orange}33` }}>🏕️ Ce créneau horaire apparaîtra <b>du lundi au vendredi</b> de la semaine {form.semaine_vacances} des vacances {PERIODES.find(p=>p[0]===form.periode_vacances)?.[1]||""}.</div>}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
         <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
         <Btn onClick={save} disabled={saving} color={isStage?C.orange:C.accent}>{saving?"...":creneau?"Modifier":"Créer"}</Btn>
       </div>
@@ -184,19 +217,16 @@ const CreneauModal = ({ open, onClose, creneau, refresh }) => {
   );
 };
 
-// ═══ SLOT DETAIL MODAL (click on any slot to see info + students) ═══
+// ═══ SLOT DETAIL MODAL ═══
 const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh }) => {
   const [addEleve, setAddEleve] = useState("");
   const [addType, setAddType] = useState("abonne");
-  const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true)); // all checked by default
+  const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
   if (!open || !slot) return null;
   const isStage = slot.type_creneau === "stage";
   const allAffs = affectations.filter(a => a.creneau_id === slot.id && a.actif);
   const students = allAffs.map(a => { const el = eleves.find(e => e.id === a.eleve_id); return el ? { ...el, affectation_id: a.id, type_inscription: a.type_inscription, jours_stage: a.jours_stage } : null; }).filter(Boolean);
-
-  // Per-day count for stages
   const jourCounts = isStage ? JOURS_STAGE.map(j => allAffs.filter(a => !a.jours_stage || a.jours_stage.includes(j)).length) : [];
-
   const removeStudent = async (affId) => { await api.del("affectations_creneaux", `id=eq.${affId}`); refresh(); };
   const addStudent = async () => {
     if (!addEleve) return;
@@ -204,63 +234,60 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
     await api.post("affectations_creneaux", { eleve_id: addEleve, creneau_id: slot.id, type_inscription: isStage ? "stage" : addType, actif: true, jours_stage: joursStr });
     setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); refresh();
   };
-
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
   const canAdd = isStage ? addJours.some(Boolean) : true;
 
   return (
     <Modal open={open} onClose={onClose} title={`${isStage?"Lun→Ven":slot.jour} ${(slot.heure_debut||"").substring(0,5)}-${(slot.heure_fin||"").substring(0,5)}`} wide>
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||slot.mode} · {tarifMode(slot.mode)}€/h</Badge>
         {isStage && <Badge color={C.orange}>Stage {periodeLabel} — S{slot.semaine_vacances}</Badge>}
         {!isStage && <><Badge color={C.accent}>Régulier</Badge><Badge color={C.textMuted}>{students.length}/{slot.capacite} places</Badge></>}
       </div>
 
-      {/* Per-day occupancy for stages */}
       {isStage && (
-        <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           {JOURS_STAGE.map((j, i) => {
             const full = jourCounts[i] >= slot.capacite;
-            return (<div key={j} style={{ flex: 1, textAlign: "center", padding: "6px 4px", borderRadius: 8, background: full ? C.danger+"22" : C.surfaceLight, border: `1px solid ${full ? C.danger+"44" : C.border}` }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: full ? C.danger : C.textMuted }}>{j.substring(0,3)}</div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: full ? C.danger : C.text }}>{jourCounts[i]}/{slot.capacite}</div>
+            return (<div key={j} style={{ flex: 1, textAlign: "center", padding: "8px 6px", borderRadius: 10, background: full ? C.danger+"15" : C.surfaceLight, border: `2px solid ${full ? C.danger+"44" : C.border}` }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: full ? C.danger : C.textMuted }}>{j.substring(0,3)}</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: full ? C.danger : C.text }}>{jourCounts[i]}/{slot.capacite}</div>
             </div>);
           })}
         </div>
       )}
 
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 8 }}>ÉLÈVES INSCRITS ({students.length})</div>
-        {students.length === 0 ? <div style={{ color: C.textDim, fontSize: 12 }}>Aucun élève inscrit</div> :
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Élèves inscrits ({students.length})</div>
+        {students.length === 0 ? <div style={{ color: C.textDim, fontSize: 13, padding: 20, textAlign: "center", background: C.surfaceLight, borderRadius: 10 }}>Aucun élève inscrit</div> :
           students.map(st => (
-            <div key={st.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", borderRadius: 6, background: C.surfaceLight, marginBottom: 4 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{st.prenom} {st.nom}</span>
+            <div key={st.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderRadius: 10, background: C.surfaceLight, marginBottom: 6, border: `1px solid ${C.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>
                 <Badge color={C.purple}>{st.classe}</Badge>
-                {isStage && st.jours_stage && <span style={{ fontSize: 10, color: C.orange }}>{st.jours_stage.split(",").map(j => j.substring(0,3)).join(" · ")}</span>}
+                {isStage && st.jours_stage && <span style={{ fontSize: 11, color: C.orange, fontWeight: 600 }}>{st.jours_stage.split(",").map(j => j.substring(0,3)).join(" · ")}</span>}
                 {!isStage && st.type_inscription === "occasionnel" && <Badge color={C.warning}>Occ.</Badge>}
               </div>
-              <button onClick={() => removeStudent(st.affectation_id)} style={{ background: "none", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, opacity: 0.6 }}>✕ Retirer</button>
+              <button onClick={() => removeStudent(st.affectation_id)} style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "4px 10px", borderRadius: 6, fontWeight: 600 }}>✕ Retirer</button>
             </div>
           ))
         }
       </div>
 
-      {/* Add student */}
-      <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 8 }}>INSCRIRE UN ÉLÈVE</div>
+      <div style={{ borderTop: `2px solid ${C.border}`, paddingTop: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Inscrire un élève</div>
         <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif && !students.find(s => s.id === e.id)).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
 
         {isStage ? (
           <div>
-            <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6, fontWeight: 600 }}>Jours de présence</div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Jours de présence</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
               {JOURS_STAGE.map((j, i) => {
                 const full = jourCounts[i] >= slot.capacite;
                 const checked = addJours[i] && !full;
-                return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "8px 4px", borderRadius: 8, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
-                  <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange }} />
-                  <span style={{ fontSize: 11, fontWeight: 600, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
+                return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 6px", borderRadius: 10, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
+                  <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange, width: 18, height: 18 }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
                   {full && <span style={{ fontSize: 9, color: C.danger }}>Complet</span>}
                 </label>);
               })}
@@ -271,7 +298,7 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <Btn onClick={addStudent} disabled={!addEleve || !canAdd} color={C.success} small>+ Inscrire</Btn>
+          <Btn onClick={addStudent} disabled={!addEleve || !canAdd} color={C.success}>+ Inscrire</Btn>
         </div>
       </div>
     </Modal>
@@ -282,7 +309,6 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
 const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, presences, onNavigate }) => {
   const [classeOpen, setClasseOpen] = useState(false);
   const [retardsOpen, setRetardsOpen] = useState(false);
-  const [incompletOpen, setIncompletOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [payEleve, setPayEleve] = useState("");
   const [slotDetail, setSlotDetail] = useState(null);
@@ -316,8 +342,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
   }, [suiviMensuel, paiements, eleves]);
 
   const totalRetard = retards.reduce((s, r) => s + r.solde, 0);
-  const incomplets = eleves.filter(e => e.actif && (!e.cotisation_payee || !e.fiche_inscription));
-  const pieColors = ["#3B82F6","#8B5CF6","#EC4899","#F59E0B","#10B981","#06B6D4","#F97316","#6366F1"];
+  const pieColors = ["#03A9F4","#9C27B0","#E91E63","#FF9800","#4CAF50","#00BCD4","#FF5722","#3F51B5"];
 
   const nextCourseSlots = useMemo(() => {
     const ctx = smart.ctx;
@@ -331,84 +356,78 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <div><h1 style={{ fontSize: 24, fontWeight: 800, color: C.text, margin: 0 }}>Tableau de bord</h1><p style={{ color: C.textMuted, margin: "4px 0 0", fontSize: 13 }}>Données en direct — {new Date().toLocaleDateString("fr-FR")}</p></div>
-        <div style={{ display: "flex", gap: 8 }}><Btn onClick={() => onNavigate("eleves", { action: "new" })} color={C.success} small>+ Nouveau client</Btn><Btn onClick={() => setPayOpen(true)} color={C.accent} small>+ Nouveau règlement</Btn></div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
+        <div><h1 style={{ fontSize: 26, fontWeight: 800, color: C.text, margin: 0 }}>Tableau de bord</h1><p style={{ color: C.textMuted, margin: "6px 0 0", fontSize: 14 }}>Données en direct — {new Date().toLocaleDateString("fr-FR")}</p></div>
+        <div style={{ display: "flex", gap: 10 }}><Btn onClick={() => onNavigate("eleves", { action: "new" })} color={C.success}>+ Nouveau client</Btn><Btn onClick={() => setPayOpen(true)} color={C.pink}>+ Nouveau règlement</Btn></div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 20 }}>
-        <KPI icon="👥" label="Élèves actifs" value={actifs} sub={`${eleves.length} au total`} color={C.accent} onClick={() => onNavigate("eleves")} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, marginBottom: 24 }}>
+        <KPI icon="👥" label="Élèves actifs" value={actifs} sub={`${eleves.length} au total`} color={C.blue} onClick={() => onNavigate("eleves")} />
         <KPI icon="📅" label="Créneaux" value={creneaux.length} sub={`${creneaux.filter(c=>(c.type_creneau||"regulier")==="regulier").length} rég. / ${creneaux.filter(c=>c.type_creneau==="stage").length} stages`} color={C.purple} onClick={() => onNavigate("creneaux")} />
         <KPI icon="💰" label="CA total" value={totalCA > 0 ? `${totalCA.toFixed(0)}€` : "—"} sub={totalPaye > 0 ? `${totalPaye.toFixed(0)}€ payés` : ""} color={C.success} />
         <KPI icon="🚨" label="Retards" value={retards.length > 0 ? `${Math.abs(totalRetard).toFixed(0)}€` : "—"} sub={retards.length > 0 ? `${retards.length} famille(s)` : "Aucun"} color={C.danger} onClick={retards.length > 0 ? () => setRetardsOpen(true) : null} />
       </div>
 
       {/* Prochain cours bandeau */}
-      <div style={{ background: `linear-gradient(135deg, ${smart.ctx.type==="vacances"?C.orange:C.accent}15, ${C.purple}15)`, border: `1px solid ${smart.ctx.type==="vacances"?C.orange:C.accent}44`, borderRadius: 14, padding: 16, marginBottom: 20, cursor: "pointer" }} onClick={() => onNavigate("planning", { date: smart.date })}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 20 }}>📋</span><span style={{ fontWeight: 700, fontSize: 15, color: C.text }}>{smart.isToday ? `Aujourd'hui — ${dayName}` : `Prochain cours — ${dayName}`}</span><Badge color={smart.ctx.type==="vacances"?C.orange:C.accent}>{ctxLabel}</Badge></div>
-          <span style={{ color: C.accentLight, fontSize: 12 }}>Ouvrir le planning →</span>
+      <div style={{ background: C.surface, border: `2px solid ${smart.ctx.type==="vacances"?C.orange:C.accent}`, borderRadius: 16, padding: 18, marginBottom: 24, cursor: "pointer", boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }} onClick={() => onNavigate("planning", { date: smart.date })}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 24 }}>📋</span><span style={{ fontWeight: 700, fontSize: 16, color: C.text }}>{smart.isToday ? `Aujourd'hui — ${dayName}` : `Prochain cours — ${dayName}`}</span><Badge color={smart.ctx.type==="vacances"?C.orange:C.accent}>{ctxLabel}</Badge></div>
+          <span style={{ color: C.accent, fontSize: 13, fontWeight: 600 }}>Ouvrir le planning →</span>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           {nextCourseSlots.length > 0 ? nextCourseSlots.map(sl => (
-            <div key={sl.id} style={{ background: C.surface, borderRadius: 8, padding: "8px 12px", border: `1px solid ${C.border}`, flex: "1 1 150px" }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: C.accentLight }}>{(sl.heure_debut||"").substring(0,5)}-{(sl.heure_fin||"").substring(0,5)}</div>
-              <div style={{ fontSize: 11, color: C.textMuted }}>{sl.students.length}/{sl.capacite} — {sl.mode}</div>
+            <div key={sl.id} style={{ background: C.surfaceLight, borderRadius: 10, padding: "10px 14px", border: `1px solid ${C.border}`, flex: "1 1 150px" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.accent }}>{(sl.heure_debut||"").substring(0,5)}-{(sl.heure_fin||"").substring(0,5)}</div>
+              <div style={{ fontSize: 12, color: C.textMuted }}>{sl.students.length}/{sl.capacite} — {sl.mode}</div>
             </div>
-          )) : <div style={{ fontSize: 12, color: C.textDim }}>Aucun créneau prévu</div>}
+          )) : <div style={{ fontSize: 13, color: C.textDim }}>Aucun créneau prévu</div>}
         </div>
       </div>
 
       {/* Charts */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, margin: "0 0 14px" }}>📊 Occupation créneaux <span style={{ fontSize: 10, color: C.textDim, fontWeight: 400 }}>(cliquez pour détails)</span></h3>
-          <ResponsiveContainer width="100%" height={creneauxOccupation.length * 30 + 20}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: "0 0 16px" }}>📊 Occupation créneaux <span style={{ fontSize: 11, color: C.textDim, fontWeight: 400 }}>(cliquez pour détails)</span></h3>
+          <ResponsiveContainer width="100%" height={creneauxOccupation.length * 32 + 20}>
             <BarChart data={creneauxOccupation} layout="vertical" onClick={(e) => { if (e?.activePayload?.[0]) { const d = e.activePayload[0].payload; const cr = creneaux.find(c => c.id === d.id); if (cr) setSlotDetail(cr); } }}>
-              <XAxis type="number" domain={[0, 6]} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} />
-              <YAxis type="category" dataKey="name" width={110} tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} />
-              <RTooltip contentStyle={{ background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} />
-              <Bar dataKey="occupes" name="Inscrits" fill={C.accent} radius={[0,4,4,0]} cursor="pointer" />
+              <XAxis type="number" domain={[0, 6]} tick={{ fill: C.textMuted, fontSize: 11 }} axisLine={false} />
+              <YAxis type="category" dataKey="name" width={110} tick={{ fill: C.textMuted, fontSize: 11 }} axisLine={false} />
+              <RTooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 13 }} />
+              <Bar dataKey="occupes" name="Inscrits" fill={C.blue} radius={[0,6,6,0]} cursor="pointer" />
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, margin: "0 0 14px" }}>💰 CA mensuel</h3>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: "0 0 16px" }}>💰 CA mensuel</h3>
           {caMensuel.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={220}>
               <BarChart data={caMensuel}>
-                <XAxis dataKey="name" tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} />
-                <YAxis tick={{ fill: C.textMuted, fontSize: 10 }} axisLine={false} />
-                <RTooltip contentStyle={{ background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 12 }} formatter={v => [`${v.toFixed(0)}€`]} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="Facturé" fill={C.accent} radius={[4,4,0,0]} />
-                <Bar dataKey="Payé" fill={C.success} radius={[4,4,0,0]} />
+                <XAxis dataKey="name" tick={{ fill: C.textMuted, fontSize: 11 }} axisLine={false} />
+                <YAxis tick={{ fill: C.textMuted, fontSize: 11 }} axisLine={false} />
+                <RTooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 13 }} formatter={v => [`${v.toFixed(0)}€`]} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="Facturé" fill={C.blue} radius={[6,6,0,0]} />
+                <Bar dataKey="Payé" fill={C.success} radius={[6,6,0,0]} />
               </BarChart>
             </ResponsiveContainer>
-          ) : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: C.textDim, fontSize: 13 }}>Après la première facturation</div>}
+          ) : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220, color: C.textDim, fontSize: 14 }}>Après la première facturation</div>}
         </div>
       </div>
 
       {/* Classe */}
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 18 }}>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
         <div onClick={() => setClasseOpen(!classeOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, margin: 0 }}>🎓 Répartition par classe</h3>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{classeData.map((d, i) => <span key={d.name} style={{ fontSize: 10, color: pieColors[i], fontWeight: 600 }}>{d.name}({d.value})</span>)}<span style={{ color: C.textMuted, fontSize: 14, marginLeft: 6 }}>{classeOpen?"▲":"▼"}</span></div>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: 0 }}>🎓 Répartition par classe</h3>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>{classeData.map((d, i) => <span key={d.name} style={{ fontSize: 11, color: pieColors[i], fontWeight: 700 }}>{d.name}({d.value})</span>)}<span style={{ color: C.textMuted, fontSize: 16, marginLeft: 8 }}>{classeOpen?"▲":"▼"}</span></div>
         </div>
-        {classeOpen && <ResponsiveContainer width="100%" height={180}><PieChart><Pie data={classeData} cx="50%" cy="50%" innerRadius={35} outerRadius={65} paddingAngle={3} dataKey="value">{classeData.map((_, i) => <Cell key={i} fill={pieColors[i%pieColors.length]} />)}</Pie></PieChart></ResponsiveContainer>}
+        {classeOpen && <ResponsiveContainer width="100%" height={200}><PieChart><Pie data={classeData} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={3} dataKey="value">{classeData.map((_, i) => <Cell key={i} fill={pieColors[i%pieColors.length]} />)}</Pie></PieChart></ResponsiveContainer>}
       </div>
 
       {/* Modals */}
       <Modal open={retardsOpen} onClose={() => setRetardsOpen(false)} title={`🚨 Retards — ${Math.abs(totalRetard).toFixed(0)}€`} wide>
-        {retards.map(r => (<div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: C.surfaceLight, borderRadius: 8, padding: "10px 14px", marginBottom: 6, borderLeft: `3px solid ${C.danger}` }}>
-          <div><span style={{ fontWeight: 700, color: C.text, fontSize: 13, cursor: "pointer" }} onClick={() => { setRetardsOpen(false); onNavigate("eleves", { openId: r.id }); }}>{r.prenom} {r.nom}</span><span style={{ fontSize: 11, color: C.textMuted, marginLeft: 8 }}>{r.classe}</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ textAlign: "right" }}><div style={{ fontWeight: 800, color: C.danger, fontSize: 15 }}>{r.solde.toFixed(0)}€</div></div><Btn small color={C.success} onClick={() => { setRetardsOpen(false); setPayEleve(r.id); setPayOpen(true); }}>💳</Btn></div>
-        </div>))}
-      </Modal>
-      <Modal open={incompletOpen} onClose={() => setIncompletOpen(false)} title="📋 Dossiers incomplets" wide>
-        {incomplets.map(e => (<div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: C.surfaceLight, borderRadius: 8, padding: "10px 14px", marginBottom: 6 }}>
-          <span style={{ fontWeight: 700, color: C.text, fontSize: 13, cursor: "pointer" }} onClick={() => { setIncompletOpen(false); onNavigate("eleves", { openId: e.id }); }}>{e.prenom} {e.nom}</span>
-          <div style={{ display: "flex", gap: 4 }}>{!e.cotisation_payee && <Badge color={C.danger}>Cotisation ❌</Badge>}{!e.fiche_inscription && <Badge color={C.warning}>Fiche ⚠️</Badge>}</div>
+        {retards.map(r => (<div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: C.surfaceLight, borderRadius: 10, padding: "12px 16px", marginBottom: 8, borderLeft: `4px solid ${C.danger}` }}>
+          <div><span style={{ fontWeight: 700, color: C.text, fontSize: 14, cursor: "pointer" }} onClick={() => { setRetardsOpen(false); onNavigate("eleves", { openId: r.id }); }}>{r.prenom} {r.nom}</span><span style={{ fontSize: 12, color: C.textMuted, marginLeft: 10 }}>{r.classe}</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ textAlign: "right" }}><div style={{ fontWeight: 800, color: C.danger, fontSize: 16 }}>{r.solde.toFixed(0)}€</div></div><Btn small color={C.success} onClick={() => { setRetardsOpen(false); setPayEleve(r.id); setPayOpen(true); }}>💳</Btn></div>
         </div>))}
       </Modal>
       <PaymentModal open={payOpen} onClose={() => { setPayOpen(false); setPayEleve(""); }} eleves={eleves} preselectedEleve={payEleve} refresh={() => onNavigate("dashboard")} />
@@ -426,8 +445,8 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const [addEleve, setAddEleve] = useState("");
   const [addType, setAddType] = useState("occasionnel");
   const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
+  const [slotDetail, setSlotDetail] = useState(null); // ← BUG FIX: ajout du useState manquant
 
-  // Per-day counts for stage slot being added to
   const addingJourCounts = useMemo(() => {
     if (!addingTo || addingTo.type_creneau !== "stage") return [];
     const affs = affectations.filter(a => a.creneau_id === addingTo.id && a.actif);
@@ -441,7 +460,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const isCoursDay = useMemo(() => {
     if (dateCtx.type === "samedi_milieu") return false;
     if (dateCtx.type === "vacances") return dow >= 1 && dow <= 5;
-    return dow >= 1 && dow <= 6; // All days possible for hors_vacances
+    return dow >= 1 && dow <= 6;
   }, [dateCtx, dow]);
 
   const loadPresences = useCallback(async () => { const d = await api.get("presences", `date_cours=eq.${selectedDate}`); setLocalPresences(d||[]); }, [selectedDate]);
@@ -450,7 +469,6 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const daySlots = useMemo(() => {
     let rel;
     if (dateCtx.type === "vacances") {
-      // Stages: show ALL stage créneaux for this period+week on every weekday (ignore jour field)
       rel = creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === dateCtx.vacance?.id && (cr.semaine_vacances === dateCtx.semaine || cr.semaine_vacances === null));
     } else {
       rel = creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dayName);
@@ -458,7 +476,6 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
     return rel.map(cr => {
       const assigned = affectations.filter(a => a.creneau_id === cr.id && a.actif);
       const students = assigned.map(a => {
-        // For stages: only show students enrolled for this specific day
         if (cr.type_creneau === "stage" && a.jours_stage && !a.jours_stage.includes(dayName)) return null;
         const el = eleves.find(e => e.id === a.eleve_id); const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id); return el ? { ...el, type_inscription: a.type_inscription, presence: pres, affectation_id: a.id, jours_stage: a.jours_stage } : null;
       }).filter(Boolean);
@@ -486,69 +503,69 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}><span style={{ fontSize: 22 }}>📋</span><h2 style={{ fontSize: 20, fontWeight: 700, color: C.text, margin: 0 }}>Planning — Appel</h2></div>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}><span style={{ fontSize: 26 }}>📋</span><h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0 }}>Planning — Appel</h2></div>
+      <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 12 }}>
         <Btn small onClick={() => moveDate(-1)} color={C.textMuted} outline>◀</Btn>
-        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ padding: "9px 14px", background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 14 }} />
+        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ padding: "10px 16px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 15, fontWeight: 600 }} />
         <Btn small onClick={() => moveDate(1)} color={C.textMuted} outline>▶</Btn>
         <Badge color={isCoursDay?C.accent:C.textDim}>{dayName}</Badge>
-        {saving && <span style={{ fontSize: 12, color: C.warning }}>⏳</span>}
+        {saving && <span style={{ fontSize: 13, color: C.warning }}>⏳ Enregistrement...</span>}
       </div>
-      <div style={{ background: ctxColor+"15", border: `1px solid ${ctxColor}33`, borderRadius: 8, padding: "8px 14px", marginBottom: 14, fontSize: 13, color: ctxColor, fontWeight: 600 }}>{ctxLabel}</div>
+      <div style={{ background: ctxColor+"15", border: `2px solid ${ctxColor}44`, borderRadius: 10, padding: "10px 16px", marginBottom: 16, fontSize: 14, color: ctxColor, fontWeight: 700 }}>{ctxLabel}</div>
 
       {isCoursDay && daySlots.length > 0 && (
-        <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
           <Badge color={C.text}>{stats.t} élèves</Badge><Badge color={C.success}>✓ {stats.p}</Badge><Badge color={C.danger}>✗ {stats.a}</Badge>
           {stats.pe > 0 && <Badge color={C.warning}>⏳ {stats.pe}</Badge>}
         </div>
       )}
 
       {!isCoursDay ? (
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 40, textAlign: "center" }}>
-          <div style={{ fontSize: 40, marginBottom: 10 }}>😴</div>
-          <div style={{ color: C.textMuted, fontSize: 14 }}>Pas de cours le {dayName}{dateCtx.type==="samedi_milieu"?" (milieu vacances)":""}</div>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ fontSize: 50, marginBottom: 12 }}>😴</div>
+          <div style={{ color: C.textMuted, fontSize: 15 }}>Pas de cours le {dayName}{dateCtx.type==="samedi_milieu"?" (milieu vacances)":""}</div>
         </div>
       ) : daySlots.length === 0 ? (
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 40, textAlign: "center" }}>
-          <div style={{ fontSize: 40, marginBottom: 10 }}>{dateCtx.type==="vacances"?"🏕️":"📅"}</div>
-          <div style={{ color: C.textMuted, fontSize: 14 }}>Aucun créneau {dateCtx.type==="vacances"?`de stage (${dateCtx.vacance.label} S${dateCtx.semaine})`:"régulier"} pour {dayName}</div>
-          <div style={{ color: C.textDim, fontSize: 12, marginTop: 6 }}>Créez-en depuis la page Créneaux</div>
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ fontSize: 50, marginBottom: 12 }}>{dateCtx.type==="vacances"?"🏕️":"📅"}</div>
+          <div style={{ color: C.textMuted, fontSize: 15 }}>Aucun créneau {dateCtx.type==="vacances"?`de stage (${dateCtx.vacance.label} S${dateCtx.semaine})`:"régulier"} pour {dayName}</div>
+          <div style={{ color: C.textDim, fontSize: 13, marginTop: 8 }}>Créez-en depuis la page Créneaux</div>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {daySlots.map(slot => {
             const allDone = slot.students.length > 0 && slot.students.every(st => st.presence);
             const tarif = tarifMode(slot.mode);
             return (
-              <div key={slot.id} style={{ background: C.surface, border: `1px solid ${allDone?C.success+"44":C.border}`, borderRadius: 14, padding: 16, borderLeft: `4px solid ${allDone?C.success:dateCtx.type==="vacances"?C.orange:C.accent}` }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontWeight: 700, fontSize: 16, color: C.text }}>{(slot.heure_debut||"").substring(0,5)} — {(slot.heure_fin||"").substring(0,5)}</span>
+              <div key={slot.id} style={{ background: C.surface, border: `2px solid ${allDone?C.success:C.border}`, borderRadius: 16, padding: 18, borderLeft: `5px solid ${allDone?C.success:dateCtx.type==="vacances"?C.orange:C.accent}`, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontWeight: 800, fontSize: 18, color: C.text }}>{(slot.heure_debut||"").substring(0,5)} — {(slot.heure_fin||"").substring(0,5)}</span>
                     <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarif}€/h</Badge>
                     <Badge color={C.textMuted}>{slot.students.length}/{slot.capacite} {dateCtx.type==="vacances"?dayName.substring(0,3):""}</Badge>
                     {slot.type_creneau==="stage" && <Badge color={C.orange}>Stage S{slot.semaine_vacances} · {dayName}</Badge>}
                   </div>
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 8 }}>
                     {!allDone && slot.students.length > 0 && <Btn small color={C.success} onClick={() => markAllPresent(slot)} title="Tous présents">✓ Tous</Btn>}
                     {slot.students.length < slot.capacite && <Btn small color={C.purple} outline onClick={() => { setAddingTo(slot); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); }}>+ Élève</Btn>}
                     {allDone && slot.students.length > 0 && <Badge color={C.success}>✅ Terminé</Badge>}
                   </div>
                 </div>
-                <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ display: "grid", gap: 6 }}>
                   {slot.students.map(st => {
                     const p = st.presence; const isP = p && p.statut==="present"; const isA = p && p.statut!=="present";
                     const ml = p?(p.statut==="present"?"Présent":p.statut==="absent_justifie"?"Abs. justifié":"Abs. non justifié"):"";
                     return (
-                      <div key={st.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: 8, background: isP?C.success+"11":isA?C.danger+"11":C.surfaceLight, border: `1px solid ${isP?C.success+"33":isA?C.danger+"33":"transparent"}` }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{st.prenom} {st.nom}</span>{st.jours_stage && st.jours_stage.split(",").length < 5 && <span style={{ fontSize: 9, color: C.orange }}>{st.jours_stage.split(",").length}j</span>}{st.type_inscription==="occasionnel"&&<Badge color={C.warning}>Occ.</Badge>}<span style={{ fontSize: 10, color: C.textDim }}>{st.classe}</span></div>
-                        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                          {p ? (<><Badge color={isP?C.success:C.danger}>{ml}</Badge>{isP&&<span style={{ fontSize: 10, color: C.success }}>{(tarif*slot.dur).toFixed(0)}€</span>}<button onClick={() => removePresence(p.id)} title="Annuler" style={{ background: "none", border: "none", color: C.textDim, fontSize: 12, cursor: "pointer" }}>↩</button></>
+                      <div key={st.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, background: isP?C.success+"12":isA?C.danger+"12":C.surfaceLight, border: `2px solid ${isP?C.success+"44":isA?C.danger+"44":C.border}` }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>{st.jours_stage && st.jours_stage.split(",").length < 5 && <span style={{ fontSize: 10, color: C.orange, fontWeight: 600 }}>{st.jours_stage.split(",").length}j</span>}{st.type_inscription==="occasionnel"&&<Badge color={C.warning}>Occ.</Badge>}<span style={{ fontSize: 11, color: C.textDim }}>{st.classe}</span></div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          {p ? (<><Badge color={isP?C.success:C.danger}>{ml}</Badge>{isP&&<span style={{ fontSize: 11, color: C.success, fontWeight: 700 }}>{(tarif*slot.dur).toFixed(0)}€</span>}<button onClick={() => removePresence(p.id)} title="Annuler" style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, fontSize: 12, cursor: "pointer", padding: "4px 8px", borderRadius: 6 }}>↩</button></>
                           ) : (<><Btn small onClick={() => markPresent(st.id, slot.id, slot.dur)} color={C.success} title="PRÉSENT — facturé">✓</Btn><Btn small onClick={() => markAbsent(st.id, slot.id, "absent_justifie")} color={C.warning} outline title="Absent justifié — non facturé">🏥</Btn><Btn small onClick={() => markAbsent(st.id, slot.id, "absent_non_justifie")} color={C.danger} outline title="Absent non justifié — facturé">❌</Btn></>)}
                         </div>
                       </div>);
                   })}
                 </div>
-                {slot.students.length === 0 && <div style={{ textAlign: "center", padding: 16, color: C.textDim, fontSize: 12 }}>Créneau vide — ajoutez des élèves depuis la page Créneaux ou cliquez + Élève</div>}
+                {slot.students.length === 0 && <div style={{ textAlign: "center", padding: 20, color: C.textDim, fontSize: 13 }}>Créneau vide — ajoutez des élèves depuis la page Créneaux ou cliquez + Élève</div>}
               </div>);
           })}
         </div>
@@ -562,15 +579,15 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
             <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
             {isStageSlot ? (
               <div>
-                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 6, fontWeight: 600 }}>Jours de présence</div>
-                <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Jours de présence</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                   {JOURS_STAGE.map((j, i) => {
                     const full = addingJourCounts[i] >= addingTo.capacite;
                     const checked = addJours[i] && !full;
-                    return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "8px 4px", borderRadius: 8, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
-                      <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange }} />
-                      <span style={{ fontSize: 11, fontWeight: 600, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
-                      <span style={{ fontSize: 9, color: full ? C.danger : C.textDim }}>{addingJourCounts[i]}/{addingTo.capacite}</span>
+                    return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 6px", borderRadius: 10, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
+                      <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange, width: 18, height: 18 }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
+                      <span style={{ fontSize: 10, color: full ? C.danger : C.textDim }}>{addingJourCounts[i]}/{addingTo.capacite}</span>
                     </label>);
                   })}
                 </div>
@@ -578,7 +595,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
             ) : (
               <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
             )}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
               <Btn onClick={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); }} color={C.textMuted} outline>Annuler</Btn>
               <Btn onClick={addOcc} disabled={!addEleve || !canAddStage}>Ajouter</Btn>
             </div>
@@ -603,42 +620,42 @@ const ElevesPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, p
   const openEdit = (s) => { setSelected(s); setEditing({...s}); }; const openNew = () => { setSelected(null); setEditing({ id:"",nom:"",prenom:"",actif:true,forfait:"groupe",classe:"6ème",cotisation_payee:false,fiche_inscription:false,tel_parent1:"",tel_parent2:"",tel_eleve:"",email:"",adresse:"",nom_parent1:"",nom_parent2:"",date_naissance:null }); };
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 22 }}>👥</span><h2 style={{ fontSize: 20, fontWeight: 700, color: C.text, margin: 0 }}>Élèves</h2><Badge color={C.accentLight}>{filtered.length}</Badge></div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 26 }}>👥</span><h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0 }}>Élèves</h2><Badge color={C.accent}>{filtered.length}</Badge></div>
         <Btn onClick={openNew} color={C.success}>+ Nouvel élève</Btn>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
-        <div style={{ position: "relative" }}><span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", opacity: 0.4 }}>🔍</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..." style={{ width: "100%", padding: "9px 12px 9px 36px", background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13, boxSizing: "border-box" }} /></div>
-        <select value={filterClasse} onChange={e => setFilterClasse(e.target.value)} style={{ padding: "9px", background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13 }}><option value="all">Toutes classes</option>{CLASSES.map(c => <option key={c} value={c}>{c}</option>)}</select>
-        <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ padding: "9px", background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13 }}><option value="all">Tous</option><option value="actif">Actifs</option><option value="inactif">Inactifs</option></select>
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 12, marginBottom: 18 }}>
+        <div style={{ position: "relative" }}><span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", opacity: 0.4, fontSize: 16 }}>🔍</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..." style={{ width: "100%", padding: "10px 14px 10px 40px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 14, boxSizing: "border-box" }} /></div>
+        <select value={filterClasse} onChange={e => setFilterClasse(e.target.value)} style={{ padding: "10px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 14 }}><option value="all">Toutes classes</option>{CLASSES.map(c => <option key={c} value={c}>{c}</option>)}</select>
+        <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ padding: "10px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 14 }}><option value="all">Tous</option><option value="actif">Actifs</option><option value="inactif">Inactifs</option></select>
       </div>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>{["","Élève","Classe","Forfait","Solde","~Prov.","Tél","Dossier",""].map((h,i) => <th key={i} style={{ padding: "10px 14px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: "uppercase" }}>{h}</th>)}</tr></thead>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr style={{ borderBottom: `2px solid ${C.border}`, background: C.blue+"15" }}>{["","Élève","Classe","Forfait","Solde","~Prov.","Tél","Dossier",""].map((h,i) => <th key={i} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: C.blue, textTransform: "uppercase" }}>{h}</th>)}</tr></thead>
           <tbody>{filtered.map(s => { const f = FORFAITS[s.forfait]||{l:s.forfait,c:C.textMuted}; const {solde,facture,provisoire} = soldeEleve(s.id); return (
-            <tr key={s.id} style={{ borderBottom: `1px solid ${C.border}11`, cursor: "pointer" }} onClick={() => openEdit(s)} onMouseEnter={e => e.currentTarget.style.background=C.surfaceLight} onMouseLeave={e => e.currentTarget.style.background="transparent"}>
-              <td style={{ padding: "8px 14px", width: 30 }}><div style={{ width: 8, height: 8, borderRadius: "50%", background: s.actif?C.success:C.danger }} /></td>
-              <td style={{ padding: "8px 14px" }}><div style={{ fontWeight: 600, color: C.text, fontSize: 13 }}>{s.prenom} {s.nom}</div></td>
-              <td style={{ padding: "8px 14px" }}><Badge color={C.purple}>{s.classe||"—"}</Badge></td>
-              <td style={{ padding: "8px 14px" }}><Badge color={f.c}>{f.l}</Badge></td>
-              <td style={{ padding: "8px 14px" }}>{facture>0?<span style={{ fontSize: 12, fontWeight: 700, color: solde>=0?C.success:C.danger }}>{solde>=0?"+":""}{solde.toFixed(0)}€</span>:<span style={{ fontSize: 11, color: C.textDim }}>—</span>}</td>
-              <td style={{ padding: "8px 14px" }}>{provisoire>0?<span style={{ fontSize: 11, color: C.warning }}>~{provisoire.toFixed(0)}€</span>:<span style={{ fontSize: 11, color: C.textDim }}>—</span>}</td>
-              <td style={{ padding: "8px 14px", fontSize: 12, color: C.accentLight }}>{s.tel_parent1||"—"}</td>
-              <td style={{ padding: "8px 14px" }}><span style={{ fontSize: 13 }}>{s.cotisation_payee?"✅":"❌"}{s.fiche_inscription?"📋":"⚠️"}</span></td>
-              <td style={{ padding: "8px 14px", color: C.textDim }}>›</td></tr>);})}</tbody></table>
+            <tr key={s.id} style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }} onClick={() => openEdit(s)} onMouseEnter={e => e.currentTarget.style.background=C.surfaceLight} onMouseLeave={e => e.currentTarget.style.background="transparent"}>
+              <td style={{ padding: "10px 14px", width: 30 }}><div style={{ width: 10, height: 10, borderRadius: "50%", background: s.actif?C.success:C.danger }} /></td>
+              <td style={{ padding: "10px 14px" }}><div style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{s.prenom} {s.nom}</div></td>
+              <td style={{ padding: "10px 14px" }}><Badge color={C.purple}>{s.classe||"—"}</Badge></td>
+              <td style={{ padding: "10px 14px" }}><Badge color={f.c}>{f.l}</Badge></td>
+              <td style={{ padding: "10px 14px" }}>{facture>0?<span style={{ fontSize: 13, fontWeight: 700, color: solde>=0?C.success:C.danger }}>{solde>=0?"+":""}{solde.toFixed(0)}€</span>:<span style={{ fontSize: 12, color: C.textDim }}>—</span>}</td>
+              <td style={{ padding: "10px 14px" }}>{provisoire>0?<span style={{ fontSize: 12, color: C.warning, fontWeight: 600 }}>~{provisoire.toFixed(0)}€</span>:<span style={{ fontSize: 12, color: C.textDim }}>—</span>}</td>
+              <td style={{ padding: "10px 14px", fontSize: 13, color: C.accent }}>{s.tel_parent1||"—"}</td>
+              <td style={{ padding: "10px 14px" }}><span style={{ fontSize: 14 }}>{s.cotisation_payee?"✅":"❌"}{s.fiche_inscription?"📋":"⚠️"}</span></td>
+              <td style={{ padding: "10px 14px", color: C.textMuted, fontSize: 18 }}>›</td></tr>);})}</tbody></table>
       </div>
       <Modal open={!!editing} onClose={() => { setEditing(null); setSelected(null); }} title={selected?`${selected.prenom} ${selected.nom}`:"Nouvel élève"} wide>
         {editing && (<div>
-          {selected && (() => { const {facture,paye,solde,provisoire}=soldeEleve(selected.id); const crs=creneauxEleve(selected.id); return (<div style={{ marginBottom: 18 }}>
-            {crs.length>0&&<div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>{crs.map(cr => <Badge key={cr.id} color={cr.type_creneau==="stage"?C.orange:C.purple}>📅 {cr.type_creneau==="stage"?"Lun→Ven":cr.jour} {(cr.heure_debut||"").substring(0,5)}-{(cr.heure_fin||"").substring(0,5)}{cr.type_creneau==="stage"?` (Stage S${cr.semaine_vacances})`:""}</Badge>)}</div>}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, background: C.surfaceLight, borderRadius: 10, padding: 12 }}>
-              <div style={{ textAlign: "center" }}><div style={{ fontSize: 10, color: C.textMuted, fontWeight: 600 }}>FACTURÉ</div><div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>{facture>0?`${facture.toFixed(0)}€`:"—"}</div></div>
-              <div style={{ textAlign: "center" }}><div style={{ fontSize: 10, color: C.textMuted, fontWeight: 600 }}>PAYÉ</div><div style={{ fontSize: 18, fontWeight: 800, color: C.success }}>{paye>0?`${paye.toFixed(0)}€`:"—"}</div></div>
-              <div style={{ textAlign: "center" }}><div style={{ fontSize: 10, color: C.textMuted, fontWeight: 600 }}>SOLDE</div><div style={{ fontSize: 18, fontWeight: 800, color: facture===0?C.textDim:solde>=0?C.success:C.danger }}>{facture>0?`${solde>=0?"+":""}${solde.toFixed(0)}€`:"—"}</div></div>
-              <div style={{ textAlign: "center" }}><div style={{ fontSize: 10, color: C.warning, fontWeight: 600 }}>PROVISOIRE</div><div style={{ fontSize: 18, fontWeight: 800, color: C.warning }}>{provisoire>0?`~${provisoire.toFixed(0)}€`:"—"}</div></div>
+          {selected && (() => { const {facture,paye,solde,provisoire}=soldeEleve(selected.id); const crs=creneauxEleve(selected.id); return (<div style={{ marginBottom: 20 }}>
+            {crs.length>0&&<div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>{crs.map(cr => <Badge key={cr.id} color={cr.type_creneau==="stage"?C.orange:C.purple}>📅 {cr.type_creneau==="stage"?"Lun→Ven":cr.jour} {(cr.heure_debut||"").substring(0,5)}-{(cr.heure_fin||"").substring(0,5)}{cr.type_creneau==="stage"?` (Stage S${cr.semaine_vacances})`:""}</Badge>)}</div>}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, background: C.surfaceLight, borderRadius: 12, padding: 14 }}>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 11, color: C.textMuted, fontWeight: 700 }}>FACTURÉ</div><div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>{facture>0?`${facture.toFixed(0)}€`:"—"}</div></div>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 11, color: C.textMuted, fontWeight: 700 }}>PAYÉ</div><div style={{ fontSize: 20, fontWeight: 800, color: C.success }}>{paye>0?`${paye.toFixed(0)}€`:"—"}</div></div>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 11, color: C.textMuted, fontWeight: 700 }}>SOLDE</div><div style={{ fontSize: 20, fontWeight: 800, color: facture===0?C.textDim:solde>=0?C.success:C.danger }}>{facture>0?`${solde>=0?"+":""}${solde.toFixed(0)}€`:"—"}</div></div>
+              <div style={{ textAlign: "center" }}><div style={{ fontSize: 11, color: C.warning, fontWeight: 700 }}>PROVISOIRE</div><div style={{ fontSize: 20, fontWeight: 800, color: C.warning }}>{provisoire>0?`~${provisoire.toFixed(0)}€`:"—"}</div></div>
             </div>
-            <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 10 }}><Btn small color={C.accent} onClick={() => setDetailOpen(selected.id)}>📊 Détail</Btn><Btn small color={C.success} onClick={() => setPayOpen(true)}>💳 Règlement</Btn></div>
+            <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 12 }}><Btn small color={C.accent} onClick={() => setDetailOpen(selected.id)}>📊 Détail</Btn><Btn small color={C.success} onClick={() => setPayOpen(true)}>💳 Règlement</Btn></div>
           </div>); })()}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             {!selected && <Input label="Identifiant" value={editing.id} onChange={v => setEditing({...editing, id: v})} placeholder="Pre.NOM" />}
             <Input label="Nom" value={editing.nom} onChange={v => setEditing({...editing, nom: v})} />
             <Input label="Prénom" value={editing.prenom} onChange={v => setEditing({...editing, prenom: v})} />
@@ -646,27 +663,27 @@ const ElevesPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, p
             <Input label="Forfait" value={editing.forfait} onChange={v => setEditing({...editing, forfait: v})} options={Object.entries(FORFAITS).map(([k,v]) => [k,`${v.l} (${v.t}€/h)`])} />
             <Input label="Date naissance" value={editing.date_naissance||""} onChange={v => setEditing({...editing, date_naissance: v||null})} type="date" />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}><Input label="Parent 1" value={editing.nom_parent1||""} onChange={v => setEditing({...editing, nom_parent1: v})} /><Input label="Parent 2" value={editing.nom_parent2||""} onChange={v => setEditing({...editing, nom_parent2: v})} /></div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}><Input label="Tél parent 1" value={editing.tel_parent1||""} onChange={v => setEditing({...editing, tel_parent1: v})} /><Input label="Tél parent 2" value={editing.tel_parent2||""} onChange={v => setEditing({...editing, tel_parent2: v})} /><Input label="Tél élève" value={editing.tel_eleve||""} onChange={v => setEditing({...editing, tel_eleve: v})} /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}><Input label="Parent 1" value={editing.nom_parent1||""} onChange={v => setEditing({...editing, nom_parent1: v})} /><Input label="Parent 2" value={editing.nom_parent2||""} onChange={v => setEditing({...editing, nom_parent2: v})} /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}><Input label="Tél parent 1" value={editing.tel_parent1||""} onChange={v => setEditing({...editing, tel_parent1: v})} /><Input label="Tél parent 2" value={editing.tel_parent2||""} onChange={v => setEditing({...editing, tel_parent2: v})} /><Input label="Tél élève" value={editing.tel_eleve||""} onChange={v => setEditing({...editing, tel_eleve: v})} /></div>
           <Input label="Email" value={editing.email||""} onChange={v => setEditing({...editing, email: v})} />
           <Input label="Adresse" value={editing.adresse||""} onChange={v => setEditing({...editing, adresse: v})} />
-          <div style={{ display: "flex", gap: 16, marginTop: 8, marginBottom: 16 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, color: C.text, fontSize: 13, cursor: "pointer" }}><input type="checkbox" checked={editing.cotisation_payee} onChange={e => setEditing({...editing, cotisation_payee: e.target.checked})} /> Cotisation</label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, color: C.text, fontSize: 13, cursor: "pointer" }}><input type="checkbox" checked={editing.fiche_inscription} onChange={e => setEditing({...editing, fiche_inscription: e.target.checked})} /> Fiche</label>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, color: C.text, fontSize: 13, cursor: "pointer" }}><input type="checkbox" checked={editing.actif} onChange={e => setEditing({...editing, actif: e.target.checked})} /> Actif</label>
+          <div style={{ display: "flex", gap: 20, marginTop: 10, marginBottom: 18 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, color: C.text, fontSize: 14, cursor: "pointer" }}><input type="checkbox" checked={editing.cotisation_payee} onChange={e => setEditing({...editing, cotisation_payee: e.target.checked})} style={{ width: 18, height: 18, accentColor: C.success }} /> Cotisation</label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, color: C.text, fontSize: 14, cursor: "pointer" }}><input type="checkbox" checked={editing.fiche_inscription} onChange={e => setEditing({...editing, fiche_inscription: e.target.checked})} style={{ width: 18, height: 18, accentColor: C.success }} /> Fiche</label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, color: C.text, fontSize: 14, cursor: "pointer" }}><input type="checkbox" checked={editing.actif} onChange={e => setEditing({...editing, actif: e.target.checked})} style={{ width: 18, height: 18, accentColor: C.success }} /> Actif</label>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <div>{selected&&<Btn onClick={() => { api.patch("eleves",`id=eq.${selected.id}`,{actif:!selected.actif}); setEditing(null); setSelected(null); refresh(); }} color={selected.actif?C.danger:C.success} outline small>{selected.actif?"Désactiver":"Réactiver"}</Btn>}</div>
-            <div style={{ display: "flex", gap: 8 }}><Btn onClick={() => { setEditing(null); setSelected(null); }} color={C.textMuted} outline>Annuler</Btn><Btn onClick={saveStudent} disabled={saving||!editing.nom||!editing.prenom}>{saving?"...":"Enregistrer"}</Btn></div>
+            <div style={{ display: "flex", gap: 10 }}><Btn onClick={() => { setEditing(null); setSelected(null); }} color={C.textMuted} outline>Annuler</Btn><Btn onClick={saveStudent} disabled={saving||!editing.nom||!editing.prenom}>{saving?"...":"✓ Enregistrer"}</Btn></div>
           </div>
         </div>)}
       </Modal>
       <Modal open={!!detailOpen} onClose={() => setDetailOpen(null)} title="📊 Détail cours & règlements" wide>
-        {detailOpen && (() => { const data = getDetail(detailOpen); const el = eleves.find(e => e.id===detailOpen); return (<div><div style={{ fontWeight: 700, color: C.text, marginBottom: 12 }}>{el?.prenom} {el?.nom}</div>
-          {data.length===0?<div style={{ textAlign: "center", color: C.textDim, padding: 20 }}>Aucune donnée</div>:data.map(d => (<div key={d.mois} style={{ background: C.surfaceLight, borderRadius: 10, padding: 12, marginBottom: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><span style={{ fontWeight: 700, color: C.accentLight, fontSize: 14 }}>{d.mois}</span><div style={{ display: "flex", gap: 10 }}>{d.facture>0&&<Badge color={C.accent}>F: {d.facture.toFixed(0)}€</Badge>}{d.paiements.length>0&&<Badge color={C.success}>P: {d.paiements.reduce((s,p) => s+parseFloat(p.montant),0).toFixed(0)}€</Badge>}</div></div>
-            {d.cours.length>0&&<div style={{ fontSize: 11, color: C.textMuted }}>{d.cours.length} cours : {d.cours.map(c => new Date(c.date_cours).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"})).join(", ")}</div>}
-            {d.paiements.length>0&&<div style={{ fontSize: 11, color: C.success, marginTop: 2 }}>{d.paiements.map(p => `${parseFloat(p.montant).toFixed(0)}€ (${p.mode_paiement})`).join(", ")}</div>}
+        {detailOpen && (() => { const data = getDetail(detailOpen); const el = eleves.find(e => e.id===detailOpen); return (<div><div style={{ fontWeight: 700, color: C.text, marginBottom: 14, fontSize: 16 }}>{el?.prenom} {el?.nom}</div>
+          {data.length===0?<div style={{ textAlign: "center", color: C.textDim, padding: 24 }}>Aucune donnée</div>:data.map(d => (<div key={d.mois} style={{ background: C.surfaceLight, borderRadius: 12, padding: 14, marginBottom: 10, border: `1px solid ${C.border}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}><span style={{ fontWeight: 700, color: C.accent, fontSize: 15 }}>{d.mois}</span><div style={{ display: "flex", gap: 10 }}>{d.facture>0&&<Badge color={C.blue}>F: {d.facture.toFixed(0)}€</Badge>}{d.paiements.length>0&&<Badge color={C.success}>P: {d.paiements.reduce((s,p) => s+parseFloat(p.montant),0).toFixed(0)}€</Badge>}</div></div>
+            {d.cours.length>0&&<div style={{ fontSize: 12, color: C.textMuted }}>{d.cours.length} cours : {d.cours.map(c => new Date(c.date_cours).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"})).join(", ")}</div>}
+            {d.paiements.length>0&&<div style={{ fontSize: 12, color: C.success, marginTop: 4, fontWeight: 600 }}>{d.paiements.map(p => `${parseFloat(p.montant).toFixed(0)}€ (${p.mode_paiement})`).join(", ")}</div>}
           </div>))}</div>); })()}
       </Modal>
       <PaymentModal open={payOpen} onClose={() => setPayOpen(false)} eleves={eleves} preselectedEleve={selected?.id||""} refresh={refresh} />
@@ -684,7 +701,6 @@ const CreneauxPage = ({ creneaux, affectations, eleves, refresh }) => {
   const reguliers = creneaux.filter(cr => (cr.type_creneau||"regulier")==="regulier");
   const stages = creneaux.filter(cr => cr.type_creneau==="stage");
 
-  // Group regulars by day (all days that have slots)
   const daysReg = useMemo(() => [...new Set(reguliers.map(cr => cr.jour))].sort((a,b) => JOURS_ALL.indexOf(a)-JOURS_ALL.indexOf(b)), [reguliers]);
   const groupedReg = useMemo(() => { const g = {}; daysReg.forEach(d => g[d]=[]); reguliers.forEach(cr => { if(g[cr.jour]) { const sts = affectations.filter(a => a.creneau_id===cr.id && a.actif).map(a => { const el = eleves.find(e => e.id===a.eleve_id); return el?{...el,type_inscription:a.type_inscription,affectation_id:a.id}:null; }).filter(Boolean); g[cr.jour].push({...cr,students:sts}); } }); return g; }, [reguliers, affectations, eleves, daysReg]);
 
@@ -693,59 +709,59 @@ const CreneauxPage = ({ creneaux, affectations, eleves, refresh }) => {
   const deleteCreneau = async (crId) => { if(confirm("Supprimer ce créneau ?")) { await api.del("affectations_creneaux",`creneau_id=eq.${crId}`); await api.del("creneaux",`id=eq.${crId}`); refresh(); } };
 
   const SlotCard = ({ slot }) => (
-    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, marginBottom: 8, borderLeft: `3px solid ${(FORFAITS[slot.mode]||{}).c||C.accent}`, cursor: "pointer" }} onClick={() => setSlotDetail(slot)}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-        <span style={{ fontWeight: 700, fontSize: 12, color: C.text }}>{(slot.heure_debut||"").substring(0,5)}-{(slot.heure_fin||"").substring(0,5)}</span>
-        <div style={{ display: "flex", gap: 4 }}>
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 10, borderLeft: `4px solid ${(FORFAITS[slot.mode]||{}).c||C.accent}`, cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.04)" }} onClick={() => setSlotDetail(slot)}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{(slot.heure_debut||"").substring(0,5)}-{(slot.heure_fin||"").substring(0,5)}</span>
+        <div style={{ display: "flex", gap: 6 }}>
           <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"}</Badge>
-          <button onClick={e => { e.stopPropagation(); setEditCr(slot); }} title="Modifier" style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 12 }}>✏️</button>
-          <button onClick={e => { e.stopPropagation(); deleteCreneau(slot.id); }} title="Supprimer" style={{ background: "none", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, opacity: 0.5 }}>🗑️</button>
+          <button onClick={e => { e.stopPropagation(); setEditCr(slot); }} title="Modifier" style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>✏️</button>
+          <button onClick={e => { e.stopPropagation(); deleteCreneau(slot.id); }} title="Supprimer" style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>🗑️</button>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 2, marginBottom: 6 }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 3, borderRadius: 2, background: j<slot.students.length?C.accent:C.surfaceLight }} />)}</div>
-      <div style={{ fontSize: 10, color: C.textDim }}>{slot.students.length}/{slot.capacite} — cliquer pour détails</div>
+      <div style={{ display: "flex", gap: 3, marginBottom: 8 }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 4, borderRadius: 2, background: j<slot.students.length?C.accent:C.surfaceLight }} />)}</div>
+      <div style={{ fontSize: 11, color: C.textDim }}>{slot.students.length}/{slot.capacite} — cliquer pour détails</div>
     </div>
   );
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 22 }}>📅</span><h2 style={{ fontSize: 20, fontWeight: 700, color: C.text, margin: 0 }}>Créneaux</h2></div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 26 }}>📅</span><h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0 }}>Créneaux</h2></div>
         <Btn onClick={() => setNewOpen(true)} color={C.success}>+ Nouveau créneau</Btn>
       </div>
-      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
         {[["regulier",`📅 Réguliers (${reguliers.length})`],["stage",`🏕️ Stages (${stages.length})`]].map(([k,l]) => (
-          <div key={k} onClick={() => setTab(k)} style={{ padding: "8px 16px", borderRadius: 8, cursor: "pointer", border: `2px solid ${tab===k?(k==="stage"?C.orange:C.accent):C.border}`, background: tab===k?(k==="stage"?C.orange:C.accent)+"15":"transparent", color: tab===k?C.text:C.textMuted, fontWeight: 600, fontSize: 13 }}>{l}</div>
+          <div key={k} onClick={() => setTab(k)} style={{ padding: "10px 20px", borderRadius: 10, cursor: "pointer", border: `2px solid ${tab===k?(k==="stage"?C.orange:C.accent):C.border}`, background: tab===k?(k==="stage"?C.orange:C.accent)+"15":"transparent", color: tab===k?C.text:C.textMuted, fontWeight: 700, fontSize: 14 }}>{l}</div>
         ))}
       </div>
       {tab==="regulier" ? (
-        daysReg.length===0 ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 40, textAlign: "center", color: C.textDim }}>Aucun créneau régulier</div> :
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(daysReg.length,5)}, 1fr)`, gap: 16 }}>
+        daysReg.length===0 ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center", color: C.textDim }}>Aucun créneau régulier</div> :
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(daysReg.length,5)}, 1fr)`, gap: 18 }}>
           {daysReg.map(day => (<div key={day}>
-            <div style={{ background: `linear-gradient(135deg, ${C.accent}22, ${C.purple}11)`, border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, marginBottom: 10, textAlign: "center" }}><span style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{day}</span></div>
+            <div style={{ background: C.blue+"15", border: `2px solid ${C.blue}44`, borderRadius: 12, padding: 14, marginBottom: 12, textAlign: "center" }}><span style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>{day}</span></div>
             {(groupedReg[day]||[]).map(slot => <SlotCard key={slot.id} slot={slot} />)}
           </div>))}
         </div>
       ) : (
-        Object.keys(groupedStage).length===0 ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 40, textAlign: "center" }}><div style={{ fontSize: 40, marginBottom: 10 }}>🏕️</div><div style={{ color: C.textMuted }}>Aucun créneau de stage</div></div> :
+        Object.keys(groupedStage).length===0 ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center" }}><div style={{ fontSize: 50, marginBottom: 12 }}>🏕️</div><div style={{ color: C.textMuted }}>Aucun créneau de stage</div></div> :
         Object.entries(groupedStage).sort(([a],[b]) => a.localeCompare(b)).map(([key, grp]) => {
           const plabel = PERIODES.find(p => p[0]===grp.periode)?.[1]||grp.periode;
-          return (<div key={key} style={{ marginBottom: 20 }}>
-            <div style={{ background: C.orange+"15", border: `1px solid ${C.orange}33`, borderRadius: 10, padding: "8px 14px", marginBottom: 10, fontWeight: 700, color: C.orange, fontSize: 14 }}>{plabel} — Semaine {grp.semaine}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+          return (<div key={key} style={{ marginBottom: 24 }}>
+            <div style={{ background: C.orange+"15", border: `2px solid ${C.orange}44`, borderRadius: 12, padding: "10px 16px", marginBottom: 12, fontWeight: 700, color: C.orange, fontSize: 15 }}>{plabel} — Semaine {grp.semaine}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
               {grp.slots.map(slot => (
-                <div key={slot.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, borderLeft: `3px solid ${C.orange}`, cursor: "pointer" }} onClick={() => setSlotDetail(slot)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{(slot.heure_debut||"").substring(0,5)}-{(slot.heure_fin||"").substring(0,5)}</span>
-                    <div style={{ display: "flex", gap: 4 }}>
+                <div key={slot.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, borderLeft: `4px solid ${C.orange}`, cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.04)" }} onClick={() => setSlotDetail(slot)}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{(slot.heure_debut||"").substring(0,5)}-{(slot.heure_fin||"").substring(0,5)}</span>
+                    <div style={{ display: "flex", gap: 6 }}>
                       <Badge color={C.orange}>Lun→Ven</Badge>
-                      <button onClick={e => { e.stopPropagation(); setEditCr(slot); }} style={{ background: "none", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 12 }}>✏️</button>
-                      <button onClick={e => { e.stopPropagation(); deleteCreneau(slot.id); }} style={{ background: "none", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, opacity: 0.5 }}>🗑️</button>
+                      <button onClick={e => { e.stopPropagation(); setEditCr(slot); }} style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>✏️</button>
+                      <button onClick={e => { e.stopPropagation(); deleteCreneau(slot.id); }} style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>🗑️</button>
                     </div>
                   </div>
                   <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarifMode(slot.mode)}€/h</Badge>
-                  <div style={{ display: "flex", gap: 2, margin: "8px 0 4px" }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 3, borderRadius: 2, background: j<slot.students.length?C.orange:C.surfaceLight }} />)}</div>
-                  <div style={{ fontSize: 10, color: C.textDim }}>{slot.students.length}/{slot.capacite} inscrits — cliquer pour détails</div>
+                  <div style={{ display: "flex", gap: 3, margin: "10px 0 6px" }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 4, borderRadius: 2, background: j<slot.students.length?C.orange:C.surfaceLight }} />)}</div>
+                  <div style={{ fontSize: 11, color: C.textDim }}>{slot.students.length}/{slot.capacite} inscrits — cliquer pour détails</div>
                 </div>
               ))}
             </div>
@@ -764,20 +780,20 @@ const PaiementsPage = ({ eleves, paiements, refresh }) => {
   const sorted = useMemo(() => [...paiements].sort((a,b) => new Date(b.date_paiement)-new Date(a.date_paiement)), [paiements]);
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 22 }}>💳</span><h2 style={{ fontSize: 20, fontWeight: 700, color: C.text, margin: 0 }}>Paiements</h2><Badge color={C.accentLight}>{paiements.length}</Badge></div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 26 }}>💳</span><h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0 }}>Paiements</h2><Badge color={C.accent}>{paiements.length}</Badge></div>
         <Btn onClick={() => setPayOpen(true)} color={C.success}>+ Nouveau règlement</Btn>
       </div>
-      {sorted.length===0 ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 40, textAlign: "center" }}><div style={{ fontSize: 40, marginBottom: 10 }}>💰</div><div style={{ color: C.textMuted }}>Aucun paiement</div></div> :
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr style={{ borderBottom: `1px solid ${C.border}` }}>{["Date","Élève","Montant","Mode","Mois","Note"].map((h,i) => <th key={i} style={{ padding: "10px 14px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.textMuted, textTransform: "uppercase" }}>{h}</th>)}</tr></thead>
-            <tbody>{sorted.map(p => { const el = eleves.find(e => e.id===p.eleve_id); return (<tr key={p.id} style={{ borderBottom: `1px solid ${C.border}11` }}>
-              <td style={{ padding: "8px 14px", fontSize: 12, color: C.textMuted }}>{new Date(p.date_paiement).toLocaleDateString("fr-FR")}</td>
-              <td style={{ padding: "8px 14px", fontSize: 13, fontWeight: 600, color: C.text }}>{el?`${el.prenom} ${el.nom}`:p.eleve_id}</td>
-              <td style={{ padding: "8px 14px", fontSize: 14, fontWeight: 800, color: C.success }}>{parseFloat(p.montant).toFixed(0)}€</td>
-              <td style={{ padding: "8px 14px" }}><Badge color={C.textMuted}>{p.mode_paiement}</Badge></td>
-              <td style={{ padding: "8px 14px", fontSize: 12, color: C.textMuted }}>{p.mois_concerne||"—"}</td>
-              <td style={{ padding: "8px 14px", fontSize: 12, color: C.textDim }}>{p.commentaire||"—"}</td>
+      {sorted.length===0 ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center" }}><div style={{ fontSize: 50, marginBottom: 12 }}>💰</div><div style={{ color: C.textMuted }}>Aucun paiement</div></div> :
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr style={{ borderBottom: `2px solid ${C.border}`, background: C.blue+"15" }}>{["Date","Élève","Montant","Mode","Mois","Note"].map((h,i) => <th key={i} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: C.blue, textTransform: "uppercase" }}>{h}</th>)}</tr></thead>
+            <tbody>{sorted.map(p => { const el = eleves.find(e => e.id===p.eleve_id); return (<tr key={p.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+              <td style={{ padding: "10px 14px", fontSize: 13, color: C.textMuted }}>{new Date(p.date_paiement).toLocaleDateString("fr-FR")}</td>
+              <td style={{ padding: "10px 14px", fontSize: 14, fontWeight: 700, color: C.text }}>{el?`${el.prenom} ${el.nom}`:p.eleve_id}</td>
+              <td style={{ padding: "10px 14px", fontSize: 16, fontWeight: 800, color: C.success }}>{parseFloat(p.montant).toFixed(0)}€</td>
+              <td style={{ padding: "10px 14px" }}><Badge color={C.textMuted}>{p.mode_paiement}</Badge></td>
+              <td style={{ padding: "10px 14px", fontSize: 13, color: C.textMuted }}>{p.mois_concerne||"—"}</td>
+              <td style={{ padding: "10px 14px", fontSize: 13, color: C.textDim }}>{p.commentaire||"—"}</td>
             </tr>); })}</tbody></table>
         </div>}
       <PaymentModal open={payOpen} onClose={() => setPayOpen(false)} eleves={eleves} preselectedEleve="" refresh={refresh} />
@@ -796,8 +812,8 @@ export default function App() {
   useEffect(() => { loadData(); }, [loadData]);
   const nav = (p, params={}) => { setPage(p); setPageParams(params); };
   const renderPage = () => {
-    if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 60, color: C.textMuted }}>⏳ Chargement...</div>;
-    if (error) return <div style={{ background: C.danger+"22", borderRadius: 14, padding: 24, textAlign: "center" }}><div style={{ color: C.danger, marginBottom: 10 }}>{error}</div><Btn onClick={loadData}>Réessayer</Btn></div>;
+    if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 80, color: C.textMuted, fontSize: 16 }}>⏳ Chargement...</div>;
+    if (error) return <div style={{ background: C.danger+"15", borderRadius: 16, padding: 30, textAlign: "center", border: `2px solid ${C.danger}44` }}><div style={{ color: C.danger, marginBottom: 12, fontWeight: 600 }}>{error}</div><Btn onClick={loadData}>Réessayer</Btn></div>;
     switch(page) {
       case "dashboard": return <DashboardPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} onNavigate={nav} />;
       case "planning": return <PlanningPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} refresh={loadData} initialDate={pageParams.date} />;
@@ -810,21 +826,25 @@ export default function App() {
   return (
     <div style={{ display: "flex", height: "100vh", background: C.bg, fontFamily: "'Outfit','Segoe UI',system-ui,sans-serif", color: C.text, overflow: "hidden" }}>
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-      <aside style={{ width: sidebarOpen?240:64, background: C.surface, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", transition: "width 0.3s", flexShrink: 0, overflow: "hidden" }}>
-        <div style={{ padding: sidebarOpen?"16px":"16px 8px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 10, minHeight: 60 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: `linear-gradient(135deg, ${C.accent}, ${C.purple})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🎓</div>
-          {sidebarOpen && <div><div style={{ fontWeight: 800, fontSize: 14, color: C.text }}>Bulles de Savoir</div><div style={{ fontSize: 10, color: C.textMuted }}><span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: error?C.danger:C.success, marginRight: 4 }} />{error?"Hors ligne":"Connecté"}</div></div>}
+      <aside style={{ width: sidebarOpen?260:70, background: `linear-gradient(180deg, ${C.pink} 0%, ${C.sidebarHover} 100%)`, display: "flex", flexDirection: "column", transition: "width 0.3s", flexShrink: 0, overflow: "hidden", boxShadow: "2px 0 10px rgba(0,0,0,0.1)" }}>
+        <div style={{ padding: sidebarOpen?"20px":"20px 10px", display: "flex", alignItems: "center", gap: 12, minHeight: 70 }}>
+          <div style={{ width: 42, height: 42, borderRadius: 12, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🎓</div>
+          {sidebarOpen && <div><div style={{ fontWeight: 800, fontSize: 16, color: "#fff" }}>Bulles de Savoir</div><div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: error?"#FF5722":"#4CAF50", marginRight: 6 }} />{error?"Hors ligne":"Connecté"}</div></div>}
         </div>
-        <nav style={{ flex: 1, padding: "10px 6px", display: "flex", flexDirection: "column", gap: 3 }}>
-          {PAGES.map(p => (<button key={p.key} onClick={() => { setPage(p.key); setPageParams({}); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: sidebarOpen?"9px 12px":"9px 0", borderRadius: 8, border: "none", cursor: "pointer", background: page===p.key?C.accent+"22":"transparent", color: page===p.key?C.accentLight:C.textMuted, justifyContent: sidebarOpen?"flex-start":"center", width: "100%" }}><span style={{ fontSize: 16 }}>{p.icon}</span>{sidebarOpen&&<span style={{ fontSize: 13, fontWeight: page===p.key?700:500 }}>{p.label}</span>}</button>))}
+        <nav style={{ flex: 1, padding: "12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+          {PAGES.map(p => (<button key={p.key} onClick={() => { setPage(p.key); setPageParams({}); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: sidebarOpen?"12px 16px":"12px 0", borderRadius: 10, border: "none", cursor: "pointer", background: page===p.key?"rgba(255,255,255,0.25)":"transparent", color: "#fff", justifyContent: sidebarOpen?"flex-start":"center", width: "100%", transition: "all 0.15s" }}
+            onMouseEnter={e => { if(page!==p.key) e.currentTarget.style.background="rgba(255,255,255,0.15)"; }}
+            onMouseLeave={e => { if(page!==p.key) e.currentTarget.style.background="transparent"; }}>
+            <span style={{ fontSize: 20 }}>{p.icon}</span>{sidebarOpen&&<span style={{ fontSize: 14, fontWeight: page===p.key?700:500 }}>{p.label}</span>}
+          </button>))}
         </nav>
-        <div style={{ padding: sidebarOpen?"12px 16px":"12px 8px", borderTop: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: `linear-gradient(135deg, ${C.success}, ${C.accent})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0 }}>HB</div>
-          {sidebarOpen&&<div style={{ fontSize: 12, color: C.text, fontWeight: 600 }}>Hassan</div>}
+        <div style={{ padding: sidebarOpen?"14px 20px":"14px 10px", borderTop: "1px solid rgba(255,255,255,0.15)", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>HB</div>
+          {sidebarOpen&&<div style={{ fontSize: 13, color: "#fff", fontWeight: 600 }}>Hassan</div>}
         </div>
-        <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ padding: 10, border: "none", borderTop: `1px solid ${C.border}`, background: "transparent", cursor: "pointer", color: C.textMuted }}>{sidebarOpen?"◀":"▶"}</button>
+        <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{ padding: 12, border: "none", borderTop: "1px solid rgba(255,255,255,0.15)", background: "transparent", cursor: "pointer", color: "rgba(255,255,255,0.7)", fontSize: 16 }}>{sidebarOpen?"◀":"▶"}</button>
       </aside>
-      <main style={{ flex: 1, overflow: "auto", padding: 24 }}><div style={{ maxWidth: 1100, margin: "0 auto" }}>{renderPage()}</div></main>
+      <main style={{ flex: 1, overflow: "auto", padding: 28 }}><div style={{ maxWidth: 1150, margin: "0 auto" }}>{renderPage()}</div></main>
     </div>
   );
 }
