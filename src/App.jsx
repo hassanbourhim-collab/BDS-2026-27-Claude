@@ -567,6 +567,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const [addType, setAddType] = useState("occasionnel");
   const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
   const [slotDetail, setSlotDetail] = useState(null);
+  const [arretModal, setArretModal] = useState(null); // { st, slot }
 
   const addingJourCounts = useMemo(() => {
     if (!addingTo || addingTo.type_creneau !== "stage") return [];
@@ -608,6 +609,8 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const markAbsent = async (eid, cid, m) => { setSaving(true); await api.post("presences", { eleve_id: eid, date_cours: selectedDate, creneau_id: cid, statut: m, heures: 0 }); await loadPresences(); setSaving(false); };
   const removePresence = async (pid) => { await api.del("presences", `id=eq.${pid}`); await loadPresences(); };
   const markAllPresent = async (slot) => { setSaving(true); for (const st of slot.students) { if (!st.presence) await api.post("presences", { eleve_id: st.id, date_cours: selectedDate, creneau_id: slot.id, statut: "present", heures: slot.dur }); } await loadPresences(); setSaving(false); };
+  const adjustDuration = async (pid, newH) => { if (newH < 0.5) return; await api.patch("presences", `id=eq.${pid}`, { heures: newH }); await loadPresences(); };
+  const handleArretDefinitif = async (eleveId, creneauId) => { await api.patch("affectations_creneaux", `eleve_id=eq.${eleveId}&creneau_id=eq.${creneauId}&actif=eq.true`, { actif: false }); setArretModal(null); refresh(); };
   const addOcc = async () => {
     if (!addEleve || !addingTo) return;
     const isStageSlot = addingTo.type_creneau === "stage";
@@ -686,37 +689,93 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
           {daySlots.map(slot => {
             const allDone = slot.students.length > 0 && slot.students.every(st => st.presence);
             const tarif = tarifMode(slot.mode);
+            const absJustifies = slot.students.filter(st => st.presence?.statut === "absent_justifie").length;
+            const placesProvisoires = absJustifies;
+            const placesLibres = slot.capacite - slot.students.filter(st => st.type_inscription !== "occasionnel").length;
             return (
-              <div key={slot.id} style={{ background: C.surface, border: `2px solid ${allDone?C.success:C.border}`, borderRadius: 16, padding: 18, borderLeft: `5px solid ${allDone?C.success:dateCtx.type==="vacances"?C.orange:C.accent}`, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontWeight: 800, fontSize: 18, color: C.text }}>{(slot.heure_debut||"").substring(0,5)} — {(slot.heure_fin||"").substring(0,5)}</span>
-                    <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarif}€/h</Badge>
-                    <Badge color={C.textMuted}>{slot.students.length}/{slot.capacite} {dateCtx.type==="vacances"?dayName.substring(0,3):""}</Badge>
-                    {slot.type_creneau==="stage" && <Badge color={C.orange}>Stage S{slot.semaine_vacances} · {dayName}</Badge>}
+                <div key={slot.id} style={{ background: C.surface, border: `2px solid ${allDone?C.success:C.border}`, borderRadius: 16, padding: 18, borderLeft: `5px solid ${allDone?C.success:dateCtx.type==="vacances"?C.orange:C.accent}`, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap:"wrap", gap:8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap:"wrap" }}>
+                      <span style={{ fontWeight: 800, fontSize: 18, color: C.text }}>{(slot.heure_debut||"").substring(0,5)} — {(slot.heure_fin||"").substring(0,5)}</span>
+                      <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarif}€/h</Badge>
+                      <Badge color={C.textMuted}>{slot.students.length}/{slot.capacite}</Badge>
+                      {slot.type_creneau==="stage" && <Badge color={C.orange}>Stage S{slot.semaine_vacances} · {dayName}</Badge>}
+                      {placesProvisoires > 0 && <Badge color={C.warning}>💬 {placesProvisoires} place{placesProvisoires>1?"s":""} provisoire{placesProvisoires>1?"s":""}</Badge>}
+                      {placesLibres > 0 && slot.students.length < slot.capacite && !placesProvisoires && <Badge color={C.success}>🟢 {placesLibres} place{placesLibres>1?"s":""} libre{placesLibres>1?"s":""}</Badge>}
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {!allDone && slot.students.length > 0 && <Btn small color={C.success} onClick={() => markAllPresent(slot)} title="Tous présents">✓ Tous</Btn>}
+                      {slot.students.length < slot.capacite && <Btn small color={C.purple} outline onClick={() => { setAddingTo(slot); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); }}>+ Élève</Btn>}
+                      {allDone && slot.students.length > 0 && <Badge color={C.success}>✅ Terminé</Badge>}
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    {!allDone && slot.students.length > 0 && <Btn small color={C.success} onClick={() => markAllPresent(slot)} title="Tous présents">✓ Tous</Btn>}
-                    {slot.students.length < slot.capacite && <Btn small color={C.purple} outline onClick={() => { setAddingTo(slot); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); }}>+ Élève</Btn>}
-                    {allDone && slot.students.length > 0 && <Badge color={C.success}>✅ Terminé</Badge>}
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {slot.students.map(st => {
+                      const p = st.presence;
+                      const isP = p && p.statut === "present";
+                      const isAJ = p && p.statut === "absent_justifie";
+                      const isANJ = p && p.statut === "absent_non_justifie";
+                      const hrs = p ? parseFloat(p.heures||0) : slot.dur;
+                      const montant = tarif * hrs;
+                      const rowBg = isP ? C.success+"12" : isAJ ? C.warning+"12" : isANJ ? C.danger+"12" : C.surfaceLight;
+                      const rowBorder = isP ? C.success+"44" : isAJ ? C.warning+"44" : isANJ ? C.danger+"44" : C.border;
+                      return (
+                        <div key={st.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, background: rowBg, border: `2px solid ${rowBorder}` }}>
+                          {/* Infos élève */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap:"wrap" }}>
+                            <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>
+                            {st.jours_stage && st.jours_stage.split(",").length < 5 && <span style={{ fontSize: 10, color: C.orange, fontWeight: 600 }}>{st.jours_stage.split(",").length}j</span>}
+                            {st.type_inscription==="occasionnel" && <Badge color={C.warning}>Occ.</Badge>}
+                            <span style={{ fontSize: 11, color: C.textDim }}>{st.classe}</span>
+                            {/* Arrêt définitif */}
+                            {!p && st.type_inscription !== "occasionnel" && (
+                              <button onClick={() => setArretModal({ st, slot })} title="Arrêt définitif — libère la place permanently" style={{ background: C.danger+"15", border: `1px solid ${C.danger}33`, color: C.danger, cursor: "pointer", fontSize: 10, padding: "2px 7px", borderRadius: 6, fontWeight: 700 }}>🚪 Arrêt</button>
+                            )}
+                          </div>
+                          {/* Actions / Statut */}
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink:0 }}>
+                            {p ? (
+                              <>
+                                {/* Présent : afficher durée ajustable */}
+                                {isP && (
+                                  <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                                    <button onClick={() => adjustDuration(p.id, Math.round((hrs-0.5)*2)/2)} style={{ background:C.surfaceLight, border:`1px solid ${C.border}`, color:C.text, cursor:"pointer", width:24, height:24, borderRadius:6, fontWeight:700, fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
+                                    <span style={{ fontSize:13, fontWeight:700, color:C.success, minWidth:32, textAlign:"center" }}>{hrs}h</span>
+                                    <button onClick={() => adjustDuration(p.id, Math.round((hrs+0.5)*2)/2)} style={{ background:C.surfaceLight, border:`1px solid ${C.border}`, color:C.text, cursor:"pointer", width:24, height:24, borderRadius:6, fontWeight:700, fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
+                                    <span style={{ fontSize:12, fontWeight:700, color:C.success, marginLeft:2 }}>{montant.toFixed(0)}€</span>
+                                  </div>
+                                )}
+                                {/* Absent justifié */}
+                                {isAJ && (
+                                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                                    <Badge color={C.warning}>🏥 Prévenu</Badge>
+                                    <span style={{ fontSize:11, color:C.warning, fontWeight:600 }}>Non facturé</span>
+                                    <Badge color={C.blue}>💬 Place provisoire</Badge>
+                                  </div>
+                                )}
+                                {/* Absent non justifié */}
+                                {isANJ && (
+                                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                                    <Badge color={C.danger}>❌ Non prévenu</Badge>
+                                    <span style={{ fontSize:11, color:C.danger, fontWeight:600 }}>Facturé {(tarif*slot.dur).toFixed(0)}€</span>
+                                  </div>
+                                )}
+                                <button onClick={() => removePresence(p.id)} title="Annuler le statut" style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, fontSize: 12, cursor: "pointer", padding: "4px 8px", borderRadius: 6 }}>↩</button>
+                              </>
+                            ) : (
+                              <>
+                                <Btn small onClick={() => markPresent(st.id, slot.id, slot.dur)} color={C.success} title="Présent — facturé">✓ Présent</Btn>
+                                <Btn small onClick={() => markAbsent(st.id, slot.id, "absent_justifie")} color={C.warning} outline title="Absent prévenu — non facturé, place provisoire">🏥 Prévenu</Btn>
+                                <Btn small onClick={() => markAbsent(st.id, slot.id, "absent_non_justifie")} color={C.danger} outline title="Absent non prévenu — facturé quand même">❌ Non prévenu</Btn>
+                              </>
+                            )}
+                          </div>
+                        </div>);
+                    })}
                   </div>
+                  {slot.students.length === 0 && <div style={{ textAlign: "center", padding: 20, color: C.textDim, fontSize: 13 }}>Créneau vide — ajoutez des élèves depuis la page Créneaux ou cliquez + Élève</div>}
                 </div>
-                <div style={{ display: "grid", gap: 6 }}>
-                  {slot.students.map(st => {
-                    const p = st.presence; const isP = p && p.statut==="present"; const isA = p && p.statut!=="present";
-                    const ml = p?(p.statut==="present"?"Présent":p.statut==="absent_justifie"?"Abs. justifié":"Abs. non justifié"):"";
-                    return (
-                      <div key={st.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, background: isP?C.success+"12":isA?C.danger+"12":C.surfaceLight, border: `2px solid ${isP?C.success+"44":isA?C.danger+"44":C.border}` }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>{st.jours_stage && st.jours_stage.split(",").length < 5 && <span style={{ fontSize: 10, color: C.orange, fontWeight: 600 }}>{st.jours_stage.split(",").length}j</span>}{st.type_inscription==="occasionnel"&&<Badge color={C.warning}>Occ.</Badge>}<span style={{ fontSize: 11, color: C.textDim }}>{st.classe}</span></div>
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          {p ? (<><Badge color={isP?C.success:C.danger}>{ml}</Badge>{isP&&<span style={{ fontSize: 11, color: C.success, fontWeight: 700 }}>{(tarif*slot.dur).toFixed(0)}€</span>}<button onClick={() => removePresence(p.id)} title="Annuler" style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, fontSize: 12, cursor: "pointer", padding: "4px 8px", borderRadius: 6 }}>↩</button></>
-                          ) : (<><Btn small onClick={() => markPresent(st.id, slot.id, slot.dur)} color={C.success} title="PRÉSENT — facturé">✓</Btn><Btn small onClick={() => markAbsent(st.id, slot.id, "absent_justifie")} color={C.warning} outline title="Absent justifié — non facturé">🏥</Btn><Btn small onClick={() => markAbsent(st.id, slot.id, "absent_non_justifie")} color={C.danger} outline title="Absent non justifié — facturé">❌</Btn></>)}
-                        </div>
-                      </div>);
-                  })}
-                </div>
-                {slot.students.length === 0 && <div style={{ textAlign: "center", padding: 20, color: C.textDim, fontSize: 13 }}>Créneau vide — ajoutez des élèves depuis la page Créneaux ou cliquez + Élève</div>}
-              </div>);
+            );
           })}
         </div>
       )}
@@ -754,6 +813,28 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
         })()}
       </Modal>
       <SlotDetailModal open={!!slotDetail} onClose={() => setSlotDetail(null)} slot={slotDetail} eleves={eleves} affectations={affectations} refresh={() => { refresh(); loadPresences(); }} />
+
+      {/* Modal Arrêt définitif */}
+      <Modal open={!!arretModal} onClose={() => setArretModal(null)} title="🚪 Arrêt définitif">
+        {arretModal && (
+          <div>
+            <div style={{ background: C.danger+"10", border: `2px solid ${C.danger}33`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: C.text, marginBottom: 6 }}>{arretModal.st.prenom} {arretModal.st.nom}</div>
+              <div style={{ fontSize: 13, color: C.textMuted }}>Créneau : {arretModal.slot.jour || "Lun→Ven"} {(arretModal.slot.heure_debut||"").substring(0,5)}–{(arretModal.slot.heure_fin||"").substring(0,5)}</div>
+            </div>
+            <div style={{ fontSize: 14, color: C.text, marginBottom: 8 }}>
+              Confirmer l'arrêt définitif de cet élève dans ce créneau ?
+            </div>
+            <div style={{ background: C.warning+"15", border: `1px solid ${C.warning}44`, borderRadius: 10, padding: 12, marginBottom: 20, fontSize: 13, color: C.warning, fontWeight: 600 }}>
+              ⚠️ La place sera libérée définitivement et disponible pour un autre élève.
+            </div>
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:10 }}>
+              <Btn onClick={() => setArretModal(null)} color={C.textMuted} outline>Annuler</Btn>
+              <Btn onClick={() => handleArretDefinitif(arretModal.st.id, arretModal.slot.id)} color={C.danger}>🚪 Confirmer l'arrêt</Btn>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
