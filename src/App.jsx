@@ -96,6 +96,8 @@ const getSmartDay = () => {
 const getMoisActuel = () => ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"][new Date().getMonth()];
 const tarifMode = (mode) => ({ individuel: 35, Triple: 20, double: 25 }[mode] || 15);
 const slotDur = (cr) => { if (!cr.heure_debut || !cr.heure_fin) return 2; const [h1,m1] = cr.heure_debut.split(":").map(Number); const [h2,m2] = cr.heure_fin.split(":").map(Number); return (h2 + (m2||0)/60) - (h1 + (m1||0)/60) || 2; };
+const getWeekDates = (dateStr) => { const d = new Date(dateStr); const dow = d.getDay(); const diffToMon = dow === 0 ? -6 : 1 - dow; const mon = new Date(d); mon.setDate(d.getDate() + diffToMon); return Array.from({length: 6}, (_, i) => { const day = new Date(mon); day.setDate(mon.getDate() + i); return day.toISOString().split("T")[0]; }); };
+const todayStr = () => new Date().toISOString().split("T")[0];
 
 // ═══ UI COMPONENTS ═══
 const Badge = ({ children, color = C.accent, onClick, title }) => (
@@ -436,16 +438,135 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
   );
 };
 
+// ═══ VUE SEMAINE (style Pronote) ═══
+const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick }) => {
+  const weekDates = useMemo(() => getWeekDates(baseDate), [baseDate]);
+  const today = todayStr();
+
+  const weekData = useMemo(() => weekDates.map(dateStr => {
+    const ctx = getDateContext(dateStr);
+    const dow = new Date(dateStr).getDay();
+    const dayName = JOURS_SEMAINE[dow];
+    let slots = [];
+    if (ctx.type !== "samedi_milieu" && dow !== 0) {
+      if (ctx.type === "vacances" && dow >= 1 && dow <= 5) {
+        slots = creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === ctx.vacance?.id && cr.semaine_vacances === ctx.semaine);
+      } else if (ctx.type === "hors_vacances" && dow >= 1 && dow <= 6) {
+        slots = creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dayName);
+      }
+    }
+    const slotsWithData = slots.sort((a,b) => (a.heure_debut||"").localeCompare(b.heure_debut||"")).map(cr => {
+      const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif);
+      const n = ctx.type === "vacances"
+        ? aff.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
+        : aff.length;
+      const pct = cr.capacite > 0 ? n / cr.capacite : 0;
+      const fillColor = pct >= 1 ? C.danger : pct > 0 && pct < 1 ? C.warning : C.success;
+      const fillLabel = pct >= 1 ? "Complet" : pct >= 0.5 ? "Partiel" : n > 0 ? "Partiel" : "Libre";
+      const dayPres = presences.filter(p => p.date_cours === dateStr && p.creneau_id === cr.id);
+      const appelFait = n > 0 && dayPres.length >= n;
+      return { ...cr, n, pct, fillColor, fillLabel, appelFait };
+    });
+    return { dateStr, ctx, dayName, dow, slots: slotsWithData, isToday: dateStr === today };
+  }), [weekDates, creneaux, affectations, presences, today]);
+
+  // Semaine label
+  const d0 = new Date(weekDates[0]); const d5 = new Date(weekDates[5]);
+  const wLabel = `${d0.getDate()} ${d0.toLocaleDateString("fr-FR",{month:"short"})} — ${d5.getDate()} ${d5.toLocaleDateString("fr-FR",{month:"short",year:"numeric"})}`;
+
+  // Detect if this is a vacation week
+  const vacCtx = weekData.find(d => d.ctx.type === "vacances")?.ctx;
+
+  return (
+    <div>
+      {/* Bandeau semaine */}
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
+        <span style={{ fontSize:14, fontWeight:700, color:C.textMuted }}>{wLabel}</span>
+        {vacCtx && <span style={{ background:C.orange+"20", color:C.orange, fontWeight:700, fontSize:12, padding:"4px 12px", borderRadius:20, border:`1px solid ${C.orange}44` }}>🏕️ {vacCtx.vacance.label} — Semaine {vacCtx.semaine}</span>}
+      </div>
+
+      {/* Légende */}
+      <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
+        {[[C.success,"Libre"],[C.warning,"Partiel"],[C.danger,"Complet"]].map(([col,lbl]) => (
+          <div key={lbl} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.textMuted }}>
+            <div style={{ width:12, height:12, borderRadius:3, background:col }} />{lbl}
+          </div>
+        ))}
+        <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.textMuted }}>
+          <div style={{ width:12, height:12, borderRadius:3, background:C.blue+"60", border:`1px solid ${C.blue}` }} />Appel fait
+        </div>
+      </div>
+
+      {/* Grille 6 colonnes */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(6, 1fr)", gap:8 }}>
+        {weekData.map(day => (
+          <div key={day.dateStr}>
+            {/* En-tête jour */}
+            <div
+              onClick={() => onDayClick(day.dateStr)}
+              style={{ padding:"10px 6px", textAlign:"center", borderRadius:10, marginBottom:8, cursor:"pointer",
+                background: day.isToday ? C.accent+"25" : C.surfaceLight,
+                border: `2px solid ${day.isToday ? C.accent : C.border}`,
+                transition:"all 0.15s" }}
+              onMouseEnter={e => e.currentTarget.style.borderColor=C.accent}
+              onMouseLeave={e => e.currentTarget.style.borderColor=day.isToday?C.accent:C.border}
+            >
+              <div style={{ fontSize:10, fontWeight:700, color:day.isToday?C.accent:C.textMuted, textTransform:"uppercase", letterSpacing:1 }}>{day.dayName.substring(0,3)}</div>
+              <div style={{ fontSize:18, fontWeight:800, color:day.isToday?C.accent:C.text }}>{new Date(day.dateStr).getDate()}</div>
+              {day.isToday && <div style={{ fontSize:9, color:C.accent, fontWeight:700, marginTop:2 }}>Aujourd'hui</div>}
+            </div>
+
+            {/* Contenu du jour */}
+            {day.ctx.type === "samedi_milieu" ? (
+              <div style={{ fontSize:10, color:C.textDim, textAlign:"center", padding:"12px 4px", background:C.surfaceLight, borderRadius:8, border:`1px dashed ${C.border}` }}>Milieu vacances</div>
+            ) : day.slots.length === 0 ? (
+              <div style={{ fontSize:10, color:C.textDim, textAlign:"center", padding:"20px 4px" }}>—</div>
+            ) : (
+              day.slots.map(slot => (
+                <div
+                  key={slot.id}
+                  onClick={() => onDayClick(day.dateStr)}
+                  style={{ background: slot.appelFait ? C.blue+"15" : slot.fillColor+"15",
+                    border: `2px solid ${slot.appelFait ? C.blue+"66" : slot.fillColor+"55"}`,
+                    borderLeft: `4px solid ${slot.appelFait ? C.blue : slot.fillColor}`,
+                    borderRadius:10, padding:"8px 8px", marginBottom:6, cursor:"pointer", transition:"all 0.15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,0.1)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform="none"; e.currentTarget.style.boxShadow="none"; }}
+                >
+                  <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{(slot.heure_debut||"").substring(0,5)}</div>
+                  <div style={{ fontSize:10, color:C.textMuted, marginBottom:4 }}>{(slot.heure_fin||"").substring(0,5)}</div>
+                  {/* Barre de remplissage */}
+                  <div style={{ display:"flex", gap:2, marginBottom:4 }}>
+                    {Array.from({length: Math.min(slot.capacite, 8)}).map((_, j) => (
+                      <div key={j} style={{ flex:1, height:4, borderRadius:2, background: j < slot.n ? slot.fillColor : C.border }} />
+                    ))}
+                  </div>
+                  <div style={{ fontSize:10, fontWeight:700, color: slot.appelFait ? C.blue : slot.fillColor }}>
+                    {slot.n}/{slot.capacite}
+                    {slot.appelFait ? " ✓" : ` — ${slot.fillLabel}`}
+                  </div>
+                  <div style={{ fontSize:9, color:C.textDim, marginTop:2 }}>{(FORFAITS[slot.mode]||{}).l||slot.mode}</div>
+                </div>
+              ))
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 // ═══ PLANNING PRONOTE ═══
 const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, initialDate }) => {
   const [selectedDate, setSelectedDate] = useState(initialDate || getSmartDay().date);
+  const [viewMode, setViewMode] = useState("week"); // "week" | "day"
   const [localPresences, setLocalPresences] = useState([]);
   const [saving, setSaving] = useState(false);
   const [addingTo, setAddingTo] = useState(null);
   const [addEleve, setAddEleve] = useState("");
   const [addType, setAddType] = useState("occasionnel");
   const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
-  const [slotDetail, setSlotDetail] = useState(null); // ← BUG FIX: ajout du useState manquant
+  const [slotDetail, setSlotDetail] = useState(null);
 
   const addingJourCounts = useMemo(() => {
     if (!addingTo || addingTo.type_creneau !== "stage") return [];
@@ -498,27 +619,56 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const stats = useMemo(() => { let t=0,p=0,a=0,pe=0; daySlots.forEach(s => s.students.forEach(st => { t++; if(st.presence){st.presence.statut==="present"?p++:a++;}else pe++; })); return { t,p,a,pe }; }, [daySlots]);
 
   const moveDate = (dir) => { const d = new Date(selectedDate); d.setDate(d.getDate()+dir); setSelectedDate(d.toISOString().split("T")[0]); };
+  const moveWeek = (dir) => { const d = new Date(selectedDate); d.setDate(d.getDate()+dir*7); setSelectedDate(d.toISOString().split("T")[0]); };
   const ctxColor = dateCtx.type==="vacances"?C.orange:dateCtx.type==="samedi_milieu"?C.textDim:C.accent;
   const ctxLabel = dateCtx.type==="vacances"?`🏕️ Stage ${dateCtx.vacance.label} — Semaine ${dateCtx.semaine}`:dateCtx.type==="samedi_milieu"?"😴 Samedi milieu — pas de cours":"📚 Période scolaire";
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}><span style={{ fontSize: 26 }}>📋</span><h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0 }}>Planning — Appel</h2></div>
-      <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 12 }}>
-        <Btn small onClick={() => moveDate(-1)} color={C.textMuted} outline>◀</Btn>
-        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ padding: "10px 16px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 15, fontWeight: 600 }} />
-        <Btn small onClick={() => moveDate(1)} color={C.textMuted} outline>▶</Btn>
-        <Badge color={isCoursDay?C.accent:C.textDim}>{dayName}</Badge>
-        {saving && <span style={{ fontSize: 13, color: C.warning }}>⏳ Enregistrement...</span>}
+      {/* Header */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12 }}><span style={{ fontSize:26 }}>📋</span><h2 style={{ fontSize:22, fontWeight:800, color:C.text, margin:0 }}>Planning — Appel</h2></div>
+        {/* Toggle Vue */}
+        <div style={{ display:"flex", gap:4, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}` }}>
+          {[["week","📅 Semaine"],["day","📋 Jour"]].map(([k,l]) => (
+            <button key={k} onClick={() => setViewMode(k)} style={{ padding:"7px 16px", borderRadius:8, border:"none", cursor:"pointer", background:viewMode===k?C.accent:"transparent", color:viewMode===k?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>{l}</button>
+          ))}
+        </div>
       </div>
-      <div style={{ background: ctxColor+"15", border: `2px solid ${ctxColor}44`, borderRadius: 10, padding: "10px 16px", marginBottom: 16, fontSize: 14, color: ctxColor, fontWeight: 700 }}>{ctxLabel}</div>
 
-      {isCoursDay && daySlots.length > 0 && (
-        <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
-          <Badge color={C.text}>{stats.t} élèves</Badge><Badge color={C.success}>✓ {stats.p}</Badge><Badge color={C.danger}>✗ {stats.a}</Badge>
-          {stats.pe > 0 && <Badge color={C.warning}>⏳ {stats.pe}</Badge>}
+      {/* Barre de navigation */}
+      <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:16, flexWrap:"wrap" }}>
+        <Btn small onClick={() => viewMode==="week" ? moveWeek(-1) : moveDate(-1)} color={C.textMuted} outline>{viewMode==="week"?"◀◀":"◀"}</Btn>
+        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ padding:"10px 16px", background:C.surface, border:`2px solid ${C.border}`, borderRadius:10, color:C.text, fontSize:15, fontWeight:600 }} />
+        <Btn small onClick={() => viewMode==="week" ? moveWeek(1) : moveDate(1)} color={C.textMuted} outline>{viewMode==="week"?"▶▶":"▶"}</Btn>
+        <Btn small onClick={() => setSelectedDate(todayStr())} color={C.accent} outline>Aujourd'hui</Btn>
+        {viewMode==="day" && <Badge color={isCoursDay?C.accent:C.textDim}>{dayName}</Badge>}
+        {saving && <span style={{ fontSize:13, color:C.warning }}>⏳ Enregistrement...</span>}
+      </div>
+
+      {/* Vue Semaine */}
+      {viewMode === "week" && (
+        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:16, padding:20, boxShadow:"0 2px 8px rgba(0,0,0,0.04)", marginBottom:20 }}>
+          <WeekView
+            creneaux={creneaux}
+            affectations={affectations}
+            presences={localPresences}
+            baseDate={selectedDate}
+            onDayClick={(date) => { setSelectedDate(date); setViewMode("day"); }}
+          />
         </div>
       )}
+
+      {/* Vue Jour */}
+      {viewMode === "day" && <>
+        <div style={{ background:ctxColor+"15", border:`2px solid ${ctxColor}44`, borderRadius:10, padding:"10px 16px", marginBottom:16, fontSize:14, color:ctxColor, fontWeight:700 }}>{ctxLabel}</div>
+
+        {isCoursDay && daySlots.length > 0 && (
+          <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
+            <Badge color={C.text}>{stats.t} élèves</Badge><Badge color={C.success}>✓ {stats.p}</Badge><Badge color={C.danger}>✗ {stats.a}</Badge>
+            {stats.pe > 0 && <Badge color={C.warning}>⏳ {stats.pe}</Badge>}
+          </div>
+        )}
 
       {!isCoursDay ? (
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
@@ -570,6 +720,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
           })}
         </div>
       )}
+      </>}
 
       <Modal open={!!addingTo} onClose={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); }} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
         {addingTo && (() => {
