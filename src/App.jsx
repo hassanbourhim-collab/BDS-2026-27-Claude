@@ -556,8 +556,155 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick }) =
   );
 };
 
+// ═══ MODAL VALIDATION SÉANCE & FACTURATION ═══
+const ValidationSeanceModal = ({ open, onClose, slot, dateStr, students, suiviMensuel, refresh }) => {
+  const [mois, setMois] = useState(getMoisActuel());
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (open) setMois(getMoisActuel()); }, [open]);
+  if (!open || !slot) return null;
+
+  const tarif = tarifMode(slot.mode);
+  const dur = slotDur(slot);
+
+  // Présents (facturation réelle) + absents non justifiés (facturés quand même)
+  const aFacturer = students.filter(st =>
+    st.presence?.statut === "present" || st.presence?.statut === "absent_non_justifie"
+  ).map(st => {
+    const isPresent = st.presence.statut === "present";
+    const hrs = isPresent ? parseFloat(st.presence.heures || dur) : dur;
+    return { ...st, hrs, montant: tarif * hrs, isPresent };
+  });
+
+  const nonMarques = students.filter(st => !st.presence);
+  const absJustifies = students.filter(st => st.presence?.statut === "absent_justifie");
+  const grandTotal = aFacturer.reduce((s, st) => s + st.montant, 0);
+
+  // Groupement par famille (nom_parent1)
+  const familles = {};
+  aFacturer.forEach(st => {
+    const fkey = st.nom_parent1?.trim() || `${st.prenom} ${st.nom}`;
+    if (!familles[fkey]) familles[fkey] = { label: fkey, students: [], total: 0 };
+    familles[fkey].students.push(st);
+    familles[fkey].total += st.montant;
+  });
+
+  // Vérifie si déjà facturé ce mois
+  const existingFor = (eid) => suiviMensuel.find(s => s.eleve_id === eid && s.mois === mois);
+
+  const validate = async () => {
+    setSaving(true);
+    for (const st of aFacturer) {
+      const ex = existingFor(st.id);
+      if (ex) {
+        await api.patch("suivi_mensuel", `id=eq.${ex.id}`, { montant_facture: parseFloat(ex.montant_facture || 0) + st.montant });
+      } else {
+        await api.post("suivi_mensuel", { eleve_id: st.id, mois, montant_facture: st.montant });
+      }
+    }
+    setSaving(false); onClose(); refresh();
+  };
+
+  const dateLabel = new Date(dateStr).toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "long" });
+  const slotLabel = `${(slot.heure_debut||"").substring(0,5)}–${(slot.heure_fin||"").substring(0,5)}`;
+
+  return (
+    <Modal open={open} onClose={onClose} title="💶 Validation séance & Facturation" wide>
+      {/* En-tête séance */}
+      <div style={{ background: C.surfaceLight, borderRadius: 12, padding: "12px 16px", marginBottom: 18, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{dateLabel} · {slotLabel}</span>
+        <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||slot.mode} · {tarif}€/h</Badge>
+        <Badge color={C.textMuted}>{students.length} élève{students.length>1?"s":""}</Badge>
+      </div>
+
+      {/* Avertissement non marqués */}
+      {nonMarques.length > 0 && (
+        <div style={{ background: C.warning+"15", border: `2px solid ${C.warning}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: C.warning, fontWeight: 600 }}>
+          ⚠️ {nonMarques.length} élève{nonMarques.length>1?"s":""} non marqué{nonMarques.length>1?"s":""} : {nonMarques.map(st => `${st.prenom} ${st.nom}`).join(", ")}
+        </div>
+      )}
+
+      {/* Absents justifiés (non facturés) */}
+      {absJustifies.length > 0 && (
+        <div style={{ background: C.blue+"10", border: `1px solid ${C.blue}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: C.blue }}>
+          💬 Non facturés (absents prévenus) : {absJustifies.map(st => `${st.prenom} ${st.nom}`).join(", ")}
+        </div>
+      )}
+
+      {/* Tableau par famille */}
+      {aFacturer.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 30, color: C.textMuted, fontSize: 14 }}>
+          Aucun élève à facturer pour cette séance.
+        </div>
+      ) : (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: "uppercase", marginBottom: 10 }}>
+            Facturation par famille
+          </div>
+          {Object.entries(familles).map(([fkey, fam]) => {
+            const exTotal = fam.students.reduce((s, st) => s + parseFloat(existingFor(st.id)?.montant_facture || 0), 0);
+            return (
+              <div key={fkey} style={{ background: C.surfaceLight, borderRadius: 12, padding: 14, marginBottom: 10, border: `1px solid ${C.border}` }}>
+                {/* En-tête famille */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 18 }}>👨‍👩‍👧</span>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Famille {fkey}</span>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 800, fontSize: 18, color: C.success }}>{fam.total.toFixed(0)}€</div>
+                    {exTotal > 0 && <div style={{ fontSize: 11, color: C.textMuted }}>Déjà facturé ce mois : {exTotal.toFixed(0)}€ → nouveau total : {(exTotal + fam.total).toFixed(0)}€</div>}
+                  </div>
+                </div>
+                {/* Détail élèves */}
+                {fam.students.map(st => (
+                  <div key={st.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderRadius: 8, background: st.isPresent ? C.success+"10" : C.danger+"10", border: `1px solid ${st.isPresent ? C.success+"33" : C.danger+"33"}`, marginBottom: 4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 13 }}>{st.isPresent ? "✓" : "❌"}</span>
+                      <span style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{st.prenom} {st.nom}</span>
+                      <Badge color={C.purple}>{st.classe}</Badge>
+                      {!st.isPresent && <Badge color={C.danger}>Non prévenu</Badge>}
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: st.isPresent ? C.success : C.danger }}>
+                      {st.isPresent ? `${st.hrs}h × ${tarif}€` : `${dur}h × ${tarif}€`} = {st.montant.toFixed(0)}€
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Total + mois */}
+      {aFacturer.length > 0 && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: C.success+"15", border: `2px solid ${C.success}44`, borderRadius: 12, padding: "14px 18px", marginBottom: 18 }}>
+            <span style={{ fontWeight: 700, fontSize: 15, color: C.text }}>Total séance à facturer</span>
+            <span style={{ fontWeight: 800, fontSize: 24, color: C.success }}>{grandTotal.toFixed(0)}€</span>
+          </div>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 8, textTransform: "uppercase" }}>Imputer au mois</div>
+            <select value={mois} onChange={e => setMois(e.target.value)} style={{ width: "100%", padding: "10px 14px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 14 }}>
+              {MOIS_ORDER.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+        </>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
+        {aFacturer.length > 0 && (
+          <Btn onClick={validate} disabled={saving} color={C.success}>
+            {saving ? "⏳ Enregistrement..." : `✓ Confirmer la facturation — ${grandTotal.toFixed(0)}€`}
+          </Btn>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
 // ═══ PLANNING PRONOTE ═══
-const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, initialDate }) => {
+const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel, refresh, initialDate }) => {
   const [selectedDate, setSelectedDate] = useState(initialDate || getSmartDay().date);
   const [viewMode, setViewMode] = useState("week"); // "week" | "day"
   const [localPresences, setLocalPresences] = useState([]);
@@ -568,6 +715,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
   const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
   const [slotDetail, setSlotDetail] = useState(null);
   const [arretModal, setArretModal] = useState(null); // { st, slot }
+  const [validatingSlot, setValidatingSlot] = useState(null); // slot with students
 
   const addingJourCounts = useMemo(() => {
     if (!addingTo || addingTo.type_creneau !== "stage") return [];
@@ -706,7 +854,11 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
                     <div style={{ display: "flex", gap: 8 }}>
                       {!allDone && slot.students.length > 0 && <Btn small color={C.success} onClick={() => markAllPresent(slot)} title="Tous présents">✓ Tous</Btn>}
                       {slot.students.length < slot.capacite && <Btn small color={C.purple} outline onClick={() => { setAddingTo(slot); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); }}>+ Élève</Btn>}
-                      {allDone && slot.students.length > 0 && <Badge color={C.success}>✅ Terminé</Badge>}
+                      {allDone && slot.students.length > 0 && (
+                        <Btn small color={C.success} onClick={() => setValidatingSlot({ ...slot })} title="Valider la séance et générer la facturation">
+                          💶 Valider & Facturer
+                        </Btn>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: "grid", gap: 6 }}>
@@ -813,6 +965,16 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
         })()}
       </Modal>
       <SlotDetailModal open={!!slotDetail} onClose={() => setSlotDetail(null)} slot={slotDetail} eleves={eleves} affectations={affectations} refresh={() => { refresh(); loadPresences(); }} />
+
+      <ValidationSeanceModal
+        open={!!validatingSlot}
+        onClose={() => setValidatingSlot(null)}
+        slot={validatingSlot}
+        dateStr={selectedDate}
+        students={validatingSlot ? (daySlots.find(s => s.id === validatingSlot.id)?.students || []) : []}
+        suiviMensuel={suiviMensuel}
+        refresh={() => { refresh(); loadPresences(); }}
+      />
 
       {/* Modal Arrêt définitif */}
       <Modal open={!!arretModal} onClose={() => setArretModal(null)} title="🚪 Arrêt définitif">
@@ -1574,7 +1736,7 @@ export default function App() {
     if (error) return <div style={{ background: C.danger+"15", borderRadius: 16, padding: 30, textAlign: "center", border: `2px solid ${C.danger}44` }}><div style={{ color: C.danger, marginBottom: 12, fontWeight: 600 }}>{error}</div><Btn onClick={loadData}>Réessayer</Btn></div>;
     switch(page) {
       case "dashboard": return <DashboardPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} onNavigate={nav} />;
-      case "planning": return <PlanningPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} refresh={loadData} initialDate={pageParams.date} />;
+      case "planning": return <PlanningPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} suiviMensuel={suiviMensuel} refresh={loadData} initialDate={pageParams.date} />;
       case "eleves": return <ElevesPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} refresh={loadData} initialAction={pageParams.action} initialOpenId={pageParams.openId} />;
       case "creneaux": return <CreneauxPage creneaux={creneaux} affectations={affectations} eleves={eleves} refresh={loadData} />;
       case "paiements": return <PaiementsPage eleves={eleves} paiements={paiements} refresh={loadData} />;
