@@ -1120,10 +1120,11 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
 
   if (!slot) return null;
   const alreadyIn = affectations.filter(a => a.creneau_id === slot.id && a.actif).map(a => a.eleve_id);
-  const searchResults = search.trim().length >= 1
-    ? eleves.filter(e => e.actif && !alreadyIn.includes(e.id) &&
-        `${e.prenom} ${e.nom} ${e.nom} ${e.prenom}`.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 8)
-    : [];
+  const searchResults = eleves
+    .filter(e => e.actif && !alreadyIn.includes(e.id) &&
+      (search.trim().length === 0 || `${e.prenom} ${e.nom}`.toLowerCase().includes(search.trim().toLowerCase())))
+    .sort((a, b) => a.nom.localeCompare(b.nom))
+    .slice(0, 10);
 
   const slotLabel = `${(slot.heure_debut||"").substring(0,5)}–${(slot.heure_fin||"").substring(0,5)} · ${(FORFAITS[slot.mode]||{}).l||slot.mode}`;
   const dateLabel = new Date(dateStr).toLocaleDateString("fr-FR",{weekday:"long",day:"2-digit",month:"long"});
@@ -1171,12 +1172,11 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
               style={{ width:"100%", padding:"12px 14px 12px 42px", background:C.surface, border:`2px solid ${C.border}`, borderRadius:10, color:C.text, fontSize:15, boxSizing:"border-box" }}
             />
           </div>
-          {/* Résultats recherche */}
-          {search.trim().length >= 1 && (
-            <div style={{ border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:12 }}>
-              {searchResults.length === 0 ? (
-                <div style={{ padding:"20px", textAlign:"center", color:C.textDim, fontSize:13 }}>Aucun élève trouvé pour "{search}"</div>
-              ) : searchResults.map(el => (
+          {/* Résultats recherche — toujours visible */}
+          <div style={{ border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:12, maxHeight:320, overflowY:"auto" }}>
+            {searchResults.length === 0 ? (
+              <div style={{ padding:"20px", textAlign:"center", color:C.textDim, fontSize:13 }}>{search.trim().length > 0 ? `Aucun élève trouvé pour "${search}"` : "Tous les élèves sont déjà inscrits à ce créneau"}</div>
+            ) : searchResults.map(el => (
                 <div key={el.id}
                   onClick={() => { setSelectedEleve(el); setSearch(`${el.prenom} ${el.nom}`); }}
                   style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", cursor:"pointer", borderBottom:`1px solid ${C.border}`, background:selectedEleve?.id===el.id?C.pink+"15":"white", transition:"background 0.1s" }}
@@ -1195,8 +1195,7 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
                   {selectedEleve?.id === el.id && <span style={{ color:C.success, fontSize:20 }}>✓</span>}
                 </div>
               ))}
-            </div>
-          )}
+          </div>
           {selectedEleve && (
             <div style={{ background:C.success+"10", border:`2px solid ${C.success}44`, borderRadius:10, padding:"12px 16px", marginBottom:12, display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ fontSize:20 }}>✅</span>
