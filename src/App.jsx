@@ -1033,11 +1033,175 @@ const PaiementsPage = ({ eleves, paiements, refresh }) => {
   );
 };
 
+// ═══ MODAL INSCRIPTION PROSPECT ═══
+const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affectations, refresh }) => {
+  const [mode, setMode] = useState("search"); // "search" | "new"
+  const [search, setSearch] = useState("");
+  const [selectedEleve, setSelectedEleve] = useState(null);
+  const [typeInscription, setTypeInscription] = useState("abonne");
+  const [saving, setSaving] = useState(false);
+  const [newForm, setNewForm] = useState({});
+
+  useEffect(() => {
+    if (open) {
+      setMode("search"); setSearch(""); setSelectedEleve(null);
+      setTypeInscription("abonne"); setSaving(false);
+      setNewForm({ id:"", nom:"", prenom:"", classe:"6ème", forfait: slot?.mode||"groupe", actif:true, cotisation_payee:false, fiche_inscription:false, nom_parent1:"", tel_parent1:"", email:"", adresse:"", tel_parent2:"", tel_eleve:"", date_naissance:null });
+    }
+  }, [open, slot]);
+
+  // Auto-génère l'ID depuis nom+prénom
+  useEffect(() => {
+    if (newForm.prenom && newForm.nom) {
+      const id = `${newForm.prenom.charAt(0).toUpperCase()}${newForm.prenom.slice(1,3).toLowerCase()}.${newForm.nom.toUpperCase()}`;
+      setNewForm(f => ({ ...f, id }));
+    }
+  }, [newForm.prenom, newForm.nom]);
+
+  if (!slot) return null;
+  const alreadyIn = affectations.filter(a => a.creneau_id === slot.id && a.actif).map(a => a.eleve_id);
+  const searchResults = search.trim().length >= 1
+    ? eleves.filter(e => e.actif && !alreadyIn.includes(e.id) &&
+        `${e.prenom} ${e.nom} ${e.nom} ${e.prenom}`.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 8)
+    : [];
+
+  const slotLabel = `${(slot.heure_debut||"").substring(0,5)}–${(slot.heure_fin||"").substring(0,5)} · ${(FORFAITS[slot.mode]||{}).l||slot.mode}`;
+  const dateLabel = new Date(dateStr).toLocaleDateString("fr-FR",{weekday:"long",day:"2-digit",month:"long"});
+
+  const saveInscription = async () => {
+    setSaving(true);
+    let eleveId = selectedEleve?.id;
+    if (mode === "new") {
+      if (!newForm.nom || !newForm.prenom || !newForm.id) { setSaving(false); return; }
+      const res = await api.post("eleves", { ...newForm, date_naissance: newForm.date_naissance||null });
+      eleveId = res?.[0]?.id || newForm.id;
+    }
+    if (eleveId) {
+      await api.post("affectations_creneaux", { eleve_id: eleveId, creneau_id: slot.id, type_inscription: typeInscription, actif: true, jours_stage: null });
+    }
+    setSaving(false); onClose(); refresh();
+  };
+
+  const canSave = mode === "search" ? !!selectedEleve : !!(newForm.nom && newForm.prenom && newForm.id);
+
+  return (
+    <Modal open={open} onClose={onClose} title={`👤 Inscrire un prospect — ${slotLabel}`} wide>
+      <div style={{ background:C.surfaceLight, borderRadius:10, padding:"10px 16px", marginBottom:18, fontSize:13, color:C.textMuted }}>
+        📅 {dateLabel} · {slotLabel}
+      </div>
+
+      {/* Toggle Élève existant / Nouvel élève */}
+      <div style={{ display:"flex", gap:6, marginBottom:20, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}` }}>
+        {[["search","🔍 Élève existant"],["new","➕ Nouvel élève"]].map(([k,l]) => (
+          <button key={k} onClick={() => { setMode(k); setSelectedEleve(null); setSearch(""); }}
+            style={{ flex:1, padding:"9px 16px", borderRadius:8, border:"none", cursor:"pointer", background:mode===k?C.pink:"transparent", color:mode===k?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>{l}</button>
+        ))}
+      </div>
+
+      {/* ── Mode RECHERCHE ── */}
+      {mode === "search" && (
+        <div>
+          <div style={{ position:"relative", marginBottom:12 }}>
+            <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", fontSize:16, opacity:0.5 }}>🔍</span>
+            <input
+              autoFocus
+              value={search}
+              onChange={e => { setSearch(e.target.value); setSelectedEleve(null); }}
+              placeholder="Saisir le nom ou prénom…"
+              style={{ width:"100%", padding:"12px 14px 12px 42px", background:C.surface, border:`2px solid ${C.border}`, borderRadius:10, color:C.text, fontSize:15, boxSizing:"border-box" }}
+            />
+          </div>
+          {/* Résultats recherche */}
+          {search.trim().length >= 1 && (
+            <div style={{ border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:12 }}>
+              {searchResults.length === 0 ? (
+                <div style={{ padding:"20px", textAlign:"center", color:C.textDim, fontSize:13 }}>Aucun élève trouvé pour "{search}"</div>
+              ) : searchResults.map(el => (
+                <div key={el.id}
+                  onClick={() => { setSelectedEleve(el); setSearch(`${el.prenom} ${el.nom}`); }}
+                  style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", cursor:"pointer", borderBottom:`1px solid ${C.border}`, background:selectedEleve?.id===el.id?C.pink+"15":"white", transition:"background 0.1s" }}
+                  onMouseEnter={e => { if(selectedEleve?.id!==el.id) e.currentTarget.style.background=C.surfaceLight; }}
+                  onMouseLeave={e => { if(selectedEleve?.id!==el.id) e.currentTarget.style.background="white"; }}
+                >
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <div style={{ width:36, height:36, borderRadius:10, background:C.pink+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:700, color:C.pink }}>
+                      {el.prenom.charAt(0)}{el.nom.charAt(0)}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight:700, fontSize:14, color:C.text }}>{el.prenom} {el.nom}</div>
+                      <div style={{ fontSize:12, color:C.textMuted }}>{el.classe} · {(FORFAITS[el.forfait]||{}).l||el.forfait}</div>
+                    </div>
+                  </div>
+                  {selectedEleve?.id === el.id && <span style={{ color:C.success, fontSize:20 }}>✓</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {selectedEleve && (
+            <div style={{ background:C.success+"10", border:`2px solid ${C.success}44`, borderRadius:10, padding:"12px 16px", marginBottom:12, display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontSize:20 }}>✅</span>
+              <div><span style={{ fontWeight:700, color:C.text }}>{selectedEleve.prenom} {selectedEleve.nom}</span><span style={{ color:C.textMuted, fontSize:13, marginLeft:8 }}>{selectedEleve.classe}</span></div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Mode NOUVEL ÉLÈVE ── */}
+      {mode === "new" && (
+        <div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:4 }}>
+            <Input label="Prénom *" value={newForm.prenom||""} onChange={v => setNewForm(f=>({...f,prenom:v}))} placeholder="Prénom" />
+            <Input label="Nom *" value={newForm.nom||""} onChange={v => setNewForm(f=>({...f,nom:v}))} placeholder="NOM" />
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+            <Input label="Identifiant *" value={newForm.id||""} onChange={v => setNewForm(f=>({...f,id:v}))} placeholder="Pre.NOM" />
+            <Input label="Classe" value={newForm.classe||"6ème"} onChange={v => setNewForm(f=>({...f,classe:v}))} options={CLASSES.map(c=>[c,c])} />
+            <Input label="Forfait" value={newForm.forfait||"groupe"} onChange={v => setNewForm(f=>({...f,forfait:v}))} options={Object.entries(FORFAITS).map(([k,v])=>[k,`${v.l} (${v.t}€/h)`])} />
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <Input label="Parent" value={newForm.nom_parent1||""} onChange={v => setNewForm(f=>({...f,nom_parent1:v}))} placeholder="Nom du parent" />
+            <Input label="Téléphone parent" value={newForm.tel_parent1||""} onChange={v => setNewForm(f=>({...f,tel_parent1:v}))} placeholder="06…" />
+          </div>
+          <Input label="Email" value={newForm.email||""} onChange={v => setNewForm(f=>({...f,email:v}))} placeholder="email@exemple.com" />
+          <div style={{ background:C.warning+"12", border:`1px solid ${C.warning}33`, borderRadius:8, padding:"8px 12px", fontSize:12, color:C.warning, fontWeight:600 }}>
+            ⚠️ L'élève sera créé et inscrit à ce créneau. Pensez à compléter sa fiche depuis la page Élèves.
+          </div>
+        </div>
+      )}
+
+      {/* ── Type d'inscription ── */}
+      <div style={{ marginTop:20, marginBottom:20 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:C.textMuted, marginBottom:10, textTransform:"uppercase" }}>Type d'inscription</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+          {[
+            ["abonne","🔄 Permanent","Jusqu'à la fin de l'année scolaire",C.accent],
+            ["occasionnel","⚡ Occasionnel","Ce jour uniquement (place provisoire)",C.warning]
+          ].map(([k,l,sub,col]) => (
+            <div key={k} onClick={() => setTypeInscription(k)}
+              style={{ padding:"14px 16px", borderRadius:12, cursor:"pointer", border:`2px solid ${typeInscription===k?col:C.border}`, background:typeInscription===k?col+"12":"transparent", transition:"all 0.15s" }}>
+              <div style={{ fontWeight:700, fontSize:14, color:typeInscription===k?col:C.text, marginBottom:4 }}>{l}</div>
+              <div style={{ fontSize:12, color:C.textMuted }}>{sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display:"flex", justifyContent:"flex-end", gap:10 }}>
+        <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
+        <Btn onClick={saveInscription} disabled={saving || !canSave} color={C.success}>
+          {saving ? "⏳ Enregistrement..." : `✓ Inscrire ${typeInscription==="abonne"?"(permanent)":"(occasionnel)"}`}
+        </Btn>
+      </div>
+    </Modal>
+  );
+};
+
 // ═══ DISPONIBILITÉS ═══
-const DisponibilitesPage = ({ creneaux, affectations, eleves, presences }) => {
+const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh }) => {
   const [selectedDate, setSelectedDate] = useState(getSmartDay().date);
   const [viewMode, setViewMode] = useState("semaine"); // "jour" | "semaine"
   const [filterMode, setFilterMode] = useState("tous"); // "tous" | "regulier" | "provisoire"
+  const [inscriptionSlot, setInscriptionSlot] = useState(null);
 
   // Calcul des disponibilités pour un créneau à une date donnée
   const getDispoSlot = useCallback((cr, dateStr) => {
@@ -1243,8 +1407,11 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences }) => {
                         <Badge color={C.textMuted}>{cr.dispo.inscrits}/{cr.capacite} inscrits</Badge>
                         {cr.type_creneau==="stage" && <Badge color={C.orange}>🏕️ Stage</Badge>}
                       </div>
-                      <div style={{ fontWeight:700, fontSize:14, color:cr.dispo.total>0?C.success:C.textDim }}>
-                        {cr.dispo.total} place{cr.dispo.total>1?"s":""} dispo
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <span style={{ fontWeight:700, fontSize:14, color:cr.dispo.total>0?C.success:C.textDim }}>
+                          {cr.dispo.total} place{cr.dispo.total>1?"s":""} dispo
+                        </span>
+                        <Btn small color={C.pink} onClick={() => setInscriptionSlot(cr)}>👤 Inscrire</Btn>
                       </div>
                     </div>
 
@@ -1298,6 +1465,17 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences }) => {
           </div>
         );
       })()}
+
+      {/* Modal inscription prospect */}
+      <InscriptionProspectModal
+        open={!!inscriptionSlot}
+        onClose={() => setInscriptionSlot(null)}
+        slot={inscriptionSlot}
+        dateStr={selectedDate}
+        eleves={eleves}
+        affectations={affectations}
+        refresh={refresh}
+      />
     </div>
   );
 };
@@ -1321,7 +1499,7 @@ export default function App() {
       case "eleves": return <ElevesPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} refresh={loadData} initialAction={pageParams.action} initialOpenId={pageParams.openId} />;
       case "creneaux": return <CreneauxPage creneaux={creneaux} affectations={affectations} eleves={eleves} refresh={loadData} />;
       case "paiements": return <PaiementsPage eleves={eleves} paiements={paiements} refresh={loadData} />;
-      case "disponibilites": return <DisponibilitesPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} />;
+      case "disponibilites": return <DisponibilitesPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} refresh={loadData} />;
       default: return null;
     }
   };
