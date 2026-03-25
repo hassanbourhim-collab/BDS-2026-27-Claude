@@ -843,6 +843,9 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, refresh, init
 const ElevesPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, presences, refresh, initialAction, initialOpenId }) => {
   const [search, setSearch] = useState(""); const [filterClasse, setFilterClasse] = useState("all"); const [filterStatut, setFilterStatut] = useState("actif");
   const [selected, setSelected] = useState(null); const [editing, setEditing] = useState(null); const [detailOpen, setDetailOpen] = useState(null); const [payOpen, setPayOpen] = useState(false); const [saving, setSaving] = useState(false);
+  const [absenceModal, setAbsenceModal] = useState(false);
+  const [absForm, setAbsForm] = useState({ date_cours: "", creneau_id: "" });
+  const [absSaving, setAbsSaving] = useState(false);
   useEffect(() => { if (initialAction === "new") openNew(); if (initialOpenId) { const el = eleves.find(e => e.id === initialOpenId); if (el) openEdit(el); } }, [initialAction, initialOpenId, eleves]);
   const filtered = useMemo(() => { let l = [...eleves]; if (search) { const q = search.toLowerCase(); l = l.filter(s => `${s.nom} ${s.prenom} ${s.id}`.toLowerCase().includes(q)); } if (filterClasse!=="all") l = l.filter(s => s.classe===filterClasse); if (filterStatut==="actif") l = l.filter(s => s.actif); if (filterStatut==="inactif") l = l.filter(s => !s.actif); return l.sort((a,b) => a.nom.localeCompare(b.nom)); }, [eleves, search, filterClasse, filterStatut]);
   const soldeEleve = useCallback((eid) => { const f = suiviMensuel.filter(s => s.eleve_id===eid).reduce((s,x) => s+parseFloat(x.montant_facture||0),0); const p = paiements.filter(x => x.eleve_id===eid).reduce((s,x) => s+parseFloat(x.montant||0),0); let prov = 0; const ma = getMoisActuel(); if (!suiviMensuel.some(s => s.eleve_id===eid && s.mois===ma)) { presences.filter(x => x.eleve_id===eid && x.statut==="present").forEach(x => { const cr = creneaux.find(c => c.id===x.creneau_id); if (cr) prov += tarifMode(cr.mode)*(parseFloat(x.heures)||slotDur(cr)); }); } return { facture: f, paye: p, solde: p-f, provisoire: prov }; }, [suiviMensuel, paiements, presences, creneaux]);
@@ -885,7 +888,7 @@ const ElevesPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, p
               <div style={{ textAlign: "center" }}><div style={{ fontSize: 11, color: C.textMuted, fontWeight: 700 }}>SOLDE</div><div style={{ fontSize: 20, fontWeight: 800, color: facture===0?C.textDim:solde>=0?C.success:C.danger }}>{facture>0?`${solde>=0?"+":""}${solde.toFixed(0)}€`:"—"}</div></div>
               <div style={{ textAlign: "center" }}><div style={{ fontSize: 11, color: C.warning, fontWeight: 700 }}>PROVISOIRE</div><div style={{ fontSize: 20, fontWeight: 800, color: C.warning }}>{provisoire>0?`~${provisoire.toFixed(0)}€`:"—"}</div></div>
             </div>
-            <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 12 }}><Btn small color={C.accent} onClick={() => setDetailOpen(selected.id)}>📊 Détail</Btn><Btn small color={C.success} onClick={() => setPayOpen(true)}>💳 Règlement</Btn></div>
+            <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 12 }}><Btn small color={C.accent} onClick={() => setDetailOpen(selected.id)}>📊 Détail</Btn><Btn small color={C.success} onClick={() => setPayOpen(true)}>💳 Règlement</Btn><Btn small color={C.warning} onClick={() => { setAbsForm({ date_cours: "", creneau_id: "" }); setAbsenceModal(true); }}>📅 Absence</Btn></div>
           </div>); })()}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             {!selected && <Input label="Identifiant" value={editing.id} onChange={v => setEditing({...editing, id: v})} placeholder="Pre.NOM" />}
@@ -919,6 +922,63 @@ const ElevesPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, p
           </div>))}</div>); })()}
       </Modal>
       <PaymentModal open={payOpen} onClose={() => setPayOpen(false)} eleves={eleves} preselectedEleve={selected?.id||""} refresh={refresh} />
+
+      {/* Modal Déclarer une absence future */}
+      <Modal open={absenceModal} onClose={() => setAbsenceModal(false)} title="📅 Déclarer une absence future">
+        {selected && (() => {
+          const crsEleve = creneauxEleve(selected.id).filter(cr => cr.type_creneau !== "stage");
+          const saveAbs = async () => {
+            if (!absForm.date_cours || !absForm.creneau_id) return;
+            setAbsSaving(true);
+            // Vérifie si une présence existe déjà pour cette date/créneau
+            const existing = presences.find(p => p.eleve_id === selected.id && p.date_cours === absForm.date_cours && p.creneau_id === absForm.creneau_id);
+            if (existing) {
+              await api.patch("presences", `id=eq.${existing.id}`, { statut: "absent_justifie", heures: 0 });
+            } else {
+              await api.post("presences", { eleve_id: selected.id, date_cours: absForm.date_cours, creneau_id: absForm.creneau_id, statut: "absent_justifie", heures: 0 });
+            }
+            setAbsSaving(false); setAbsenceModal(false); refresh();
+          };
+          // Absences futures déjà déclarées pour cet élève
+          const futureAbs = presences.filter(p => p.eleve_id === selected.id && p.statut === "absent_justifie" && p.date_cours >= todayStr()).sort((a,b) => a.date_cours.localeCompare(b.date_cours));
+          return (
+            <div>
+              <div style={{ background:C.surfaceLight, borderRadius:10, padding:"10px 14px", marginBottom:18, fontSize:13, color:C.textMuted }}>
+                Élève : <strong style={{ color:C.text }}>{selected.prenom} {selected.nom}</strong>
+              </div>
+              <Input label="Date de l'absence" value={absForm.date_cours} onChange={v => setAbsForm(f=>({...f, date_cours:v}))} type="date" />
+              <Input label="Créneau" value={absForm.creneau_id} onChange={v => setAbsForm(f=>({...f, creneau_id:v}))}
+                options={[["","— Sélectionner un créneau —"], ...crsEleve.map(cr => [cr.id, `${cr.jour} ${(cr.heure_debut||"").substring(0,5)}–${(cr.heure_fin||"").substring(0,5)} (${(FORFAITS[cr.mode]||{}).l||cr.mode})`])]}
+              />
+              <div style={{ display:"flex", justifyContent:"flex-end", gap:10, marginBottom: futureAbs.length ? 20 : 0 }}>
+                <Btn onClick={() => setAbsenceModal(false)} color={C.textMuted} outline>Annuler</Btn>
+                <Btn onClick={saveAbs} disabled={absSaving || !absForm.date_cours || !absForm.creneau_id} color={C.warning}>
+                  {absSaving ? "..." : "📅 Enregistrer l'absence"}
+                </Btn>
+              </div>
+              {/* Liste des absences futures déjà déclarées */}
+              {futureAbs.length > 0 && (
+                <div>
+                  <div style={{ fontSize:11, fontWeight:700, color:C.textMuted, textTransform:"uppercase", marginBottom:8 }}>Absences prévues ({futureAbs.length})</div>
+                  {futureAbs.map(p => {
+                    const cr = creneaux.find(c => c.id === p.creneau_id);
+                    return (
+                      <div key={p.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 12px", background:C.warning+"10", borderRadius:8, border:`1px solid ${C.warning}33`, marginBottom:6 }}>
+                        <div style={{ fontSize:13, color:C.text }}>
+                          <strong>{new Date(p.date_cours).toLocaleDateString("fr-FR",{weekday:"short",day:"2-digit",month:"short"})}</strong>
+                          {cr && <span style={{ color:C.textMuted, marginLeft:8 }}>{cr.jour} {(cr.heure_debut||"").substring(0,5)}</span>}
+                        </div>
+                        <button onClick={async () => { await api.del("presences", `id=eq.${p.id}`); refresh(); }}
+                          style={{ background:C.danger+"15", border:"none", color:C.danger, cursor:"pointer", fontSize:11, padding:"3px 8px", borderRadius:6, fontWeight:600 }}>✕ Annuler</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 };
@@ -1204,19 +1264,29 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
   const [inscriptionSlot, setInscriptionSlot] = useState(null);
 
   // Calcul des disponibilités pour un créneau à une date donnée
+  // RÈGLE : placesLibres = capacité - abonnés (pas les occasionnels)
+  // Une place libre est dispo en PERMANENTE et aussi en PROVISOIRE
+  // Places provisoires SUPPLÉMENTAIRES = abonnés absents justifiés ce jour
   const getDispoSlot = useCallback((cr, dateStr) => {
-    const ctx = getDateContext(dateStr);
     const dow = new Date(dateStr).getDay();
     const dayName = JOURS_SEMAINE[dow];
     const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif);
+    // Nb total inscrits (abonnés + occasionnels) pour affichage
     const inscrits = cr.type_creneau === "stage"
       ? aff.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
       : aff.length;
-    const placesLibres = Math.max(0, cr.capacite - inscrits);
+    // Seulement les abonnés comptent pour les places permanentes
+    const abonnes = aff.filter(a => a.type_inscription === "abonne");
+    const nbAbonnes = cr.type_creneau === "stage"
+      ? abonnes.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
+      : abonnes.length;
+    const placesLibres = Math.max(0, cr.capacite - nbAbonnes); // places permanentes libres
+    // Absences justifiées de ce jour = places provisoires SUPPLÉMENTAIRES
     const absJusts = presences.filter(p => p.date_cours === dateStr && p.creneau_id === cr.id && p.statut === "absent_justifie");
-    const absJustsEleves = absJusts.map(p => { const el = eleves.find(e => e.id === p.eleve_id); return el || null; }).filter(Boolean);
-    const placesProvisoires = absJusts.length;
-    return { inscrits, placesLibres, placesProvisoires, absJustsEleves, total: placesLibres + placesProvisoires };
+    const absJustsEleves = absJusts.map(p => eleves.find(e => e.id === p.eleve_id)).filter(Boolean);
+    const placesProvisSupp = absJusts.length; // provisoires en plus des places libres
+    const totalProvisoire = placesLibres + placesProvisSupp; // total dispo ce jour en provisoire
+    return { inscrits, nbAbonnes, placesLibres, placesProvisSupp, absJustsEleves, totalProvisoire, total: totalProvisoire };
   }, [affectations, presences, eleves]);
 
   // Slots applicables pour une date
@@ -1240,7 +1310,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
     return slots.map(cr => ({ ...cr, dispo: getDispoSlot(cr, selectedDate) }))
       .filter(cr => {
         if (filterMode === "regulier") return cr.dispo.placesLibres > 0;
-        if (filterMode === "provisoire") return cr.dispo.placesProvisoires > 0;
+        if (filterMode === "provisoire") return cr.dispo.totalProvisoire > 0;
         return cr.dispo.total > 0;
       });
   }, [selectedDate, getSlotsForDate, getDispoSlot, filterMode]);
@@ -1254,11 +1324,11 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
     const slots = getSlotsForDate(dateStr);
     const dispos = slots.map(cr => ({ ...cr, dispo: getDispoSlot(cr, dateStr) }));
     const totalLibres = dispos.reduce((s, cr) => s + cr.dispo.placesLibres, 0);
-    const totalProv = dispos.reduce((s, cr) => s + cr.dispo.placesProvisoires, 0);
+    const totalProv = dispos.reduce((s, cr) => s + cr.dispo.placesProvisSupp, 0);
     return { dateStr, dayName, dow, ctx, dispos: dispos.filter(cr => cr.dispo.total > 0), totalLibres, totalProv, isToday: dateStr === todayStr() };
   }), [semaineDates, getSlotsForDate, getDispoSlot]);
 
-  const totalJour = jourData.reduce((s, cr) => ({ libres: s.libres + cr.dispo.placesLibres, prov: s.prov + cr.dispo.placesProvisoires }), { libres: 0, prov: 0 });
+  const totalJour = jourData.reduce((s, cr) => ({ libres: s.libres + cr.dispo.placesLibres, prov: s.prov + cr.dispo.placesProvisSupp }), { libres: 0, prov: 0 });
   const moveWeek = (dir) => { const d = new Date(selectedDate); d.setDate(d.getDate() + dir * 7); setSelectedDate(d.toISOString().split("T")[0]); };
   const wd0 = new Date(semaineDates[0]); const wd5 = new Date(semaineDates[5]);
   const wLabel = `${wd0.getDate()} ${wd0.toLocaleDateString("fr-FR",{month:"short"})} — ${wd5.getDate()} ${wd5.toLocaleDateString("fr-FR",{month:"short",year:"numeric"})}`;
@@ -1415,36 +1485,39 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
                       </div>
                     </div>
 
-                    {/* Détail disponibilités */}
+                    {/* Détail disponibilités — nouvelle logique */}
                     <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                      {/* Places régulières libres */}
+                      {/* Bloc 1 : place permanente libre */}
                       <div style={{ background:cr.dispo.placesLibres>0?C.success+"10":C.surfaceLight, border:`2px solid ${cr.dispo.placesLibres>0?C.success+"44":C.border}`, borderRadius:12, padding:14 }}>
                         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
                           <span style={{ fontSize:18 }}>🟢</span>
                           <div>
-                            <div style={{ fontSize:10, fontWeight:700, color:cr.dispo.placesLibres>0?C.success:C.textDim, textTransform:"uppercase" }}>Places régulières libres</div>
+                            <div style={{ fontSize:10, fontWeight:700, color:cr.dispo.placesLibres>0?C.success:C.textDim, textTransform:"uppercase" }}>Place{cr.dispo.placesLibres>1?"s":""} permanente{cr.dispo.placesLibres>1?"s":""} libre{cr.dispo.placesLibres>1?"s":""}</div>
                             <div style={{ fontSize:24, fontWeight:800, color:cr.dispo.placesLibres>0?C.success:C.textDim }}>{cr.dispo.placesLibres}</div>
                           </div>
                         </div>
                         {cr.dispo.placesLibres > 0 ? (
-                          <div style={{ fontSize:11, color:C.success }}>✓ Inscription permanente possible</div>
+                          <div>
+                            <div style={{ fontSize:11, color:C.success, marginBottom:4 }}>✓ Inscription permanente possible</div>
+                            <div style={{ fontSize:11, color:C.success, opacity:0.8 }}>💬 Aussi disponible en provisoire ce jour</div>
+                          </div>
                         ) : (
-                          <div style={{ fontSize:11, color:C.textDim }}>Créneau complet en inscription régulière</div>
+                          <div style={{ fontSize:11, color:C.textDim }}>Tous les abonnés sont inscrits ({cr.dispo.nbAbonnes}/{cr.capacite})</div>
                         )}
                       </div>
 
-                      {/* Places provisoires */}
-                      <div style={{ background:cr.dispo.placesProvisoires>0?C.warning+"10":C.surfaceLight, border:`2px solid ${cr.dispo.placesProvisoires>0?C.warning+"44":C.border}`, borderRadius:12, padding:14 }}>
+                      {/* Bloc 2 : absences justifiées du jour = places provisoires supplémentaires */}
+                      <div style={{ background:cr.dispo.placesProvisSupp>0?C.warning+"10":C.surfaceLight, border:`2px solid ${cr.dispo.placesProvisSupp>0?C.warning+"44":C.border}`, borderRadius:12, padding:14 }}>
                         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
                           <span style={{ fontSize:18 }}>💬</span>
                           <div>
-                            <div style={{ fontSize:10, fontWeight:700, color:cr.dispo.placesProvisoires>0?C.warning:C.textDim, textTransform:"uppercase" }}>Places provisoires</div>
-                            <div style={{ fontSize:24, fontWeight:800, color:cr.dispo.placesProvisoires>0?C.warning:C.textDim }}>{cr.dispo.placesProvisoires}</div>
+                            <div style={{ fontSize:10, fontWeight:700, color:cr.dispo.placesProvisSupp>0?C.warning:C.textDim, textTransform:"uppercase" }}>Absence{cr.dispo.placesProvisSupp>1?"s":""} justifiée{cr.dispo.placesProvisSupp>1?"s":""} ce jour</div>
+                            <div style={{ fontSize:24, fontWeight:800, color:cr.dispo.placesProvisSupp>0?C.warning:C.textDim }}>{cr.dispo.placesProvisSupp}</div>
                           </div>
                         </div>
-                        {cr.dispo.placesProvisoires > 0 ? (
+                        {cr.dispo.placesProvisSupp > 0 ? (
                           <div>
-                            <div style={{ fontSize:11, color:C.warning, marginBottom:6 }}>Ce jour uniquement — élève{cr.dispo.placesProvisoires>1?"s":""} absent{cr.dispo.placesProvisoires>1?"s":""} prévenu{cr.dispo.placesProvisoires>1?"s":""} :</div>
+                            <div style={{ fontSize:11, color:C.warning, marginBottom:6 }}>Place{cr.dispo.placesProvisSupp>1?"s":""} provisoire{cr.dispo.placesProvisSupp>1?"s":""} supplémentaire{cr.dispo.placesProvisSupp>1?"s":""} :</div>
                             {cr.dispo.absJustsEleves.map(el => (
                               <div key={el.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 8px", background:C.warning+"15", borderRadius:6, marginTop:3 }}>
                                 <span style={{ fontSize:13 }}>👤</span>
@@ -1454,10 +1527,17 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
                             ))}
                           </div>
                         ) : (
-                          <div style={{ fontSize:11, color:C.textDim }}>Aucune absence prévue</div>
+                          <div style={{ fontSize:11, color:C.textDim }}>Aucune absence déclarée pour ce jour</div>
                         )}
                       </div>
                     </div>
+                    {/* Total provisoire ce jour */}
+                    {cr.dispo.totalProvisoire > 0 && (
+                      <div style={{ marginTop:10, background:C.blue+"10", border:`1px solid ${C.blue}33`, borderRadius:8, padding:"8px 14px", fontSize:12, color:C.blue, fontWeight:700 }}>
+                        → Total disponible ce jour (provisoire) : {cr.dispo.totalProvisoire} place{cr.dispo.totalProvisoire>1?"s":""}
+                        {cr.dispo.placesLibres > 0 && cr.dispo.placesProvisSupp > 0 && <span style={{ fontWeight:400 }}> ({cr.dispo.placesLibres} permanente{cr.dispo.placesLibres>1?"s":""} + {cr.dispo.placesProvisSupp} absence{cr.dispo.placesProvisSupp>1?"s":""})</span>}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
