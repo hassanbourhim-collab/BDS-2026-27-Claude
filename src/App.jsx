@@ -1152,7 +1152,7 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
 
       {/* Toggle Élève existant / Nouvel élève */}
       <div style={{ display:"flex", gap:6, marginBottom:20, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}` }}>
-        {[["search","🔍 Élève existant"],["new","➕ Nouvel élève"]].map(([k,l]) => (
+        {[["search","📋 Liste des élèves"],["new","➕ Nouveau inscrit"]].map(([k,l]) => (
           <button key={k} onClick={() => { setMode(k); setSelectedEleve(null); setSearch(""); }}
             style={{ flex:1, padding:"9px 16px", borderRadius:8, border:"none", cursor:"pointer", background:mode===k?C.pink:"transparent", color:mode===k?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>{l}</button>
         ))}
