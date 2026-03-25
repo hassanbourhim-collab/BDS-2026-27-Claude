@@ -1033,8 +1033,277 @@ const PaiementsPage = ({ eleves, paiements, refresh }) => {
   );
 };
 
+// ═══ DISPONIBILITÉS ═══
+const DisponibilitesPage = ({ creneaux, affectations, eleves, presences }) => {
+  const [selectedDate, setSelectedDate] = useState(getSmartDay().date);
+  const [viewMode, setViewMode] = useState("semaine"); // "jour" | "semaine"
+  const [filterMode, setFilterMode] = useState("tous"); // "tous" | "regulier" | "provisoire"
+
+  // Calcul des disponibilités pour un créneau à une date donnée
+  const getDispoSlot = useCallback((cr, dateStr) => {
+    const ctx = getDateContext(dateStr);
+    const dow = new Date(dateStr).getDay();
+    const dayName = JOURS_SEMAINE[dow];
+    const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif);
+    const inscrits = cr.type_creneau === "stage"
+      ? aff.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
+      : aff.length;
+    const placesLibres = Math.max(0, cr.capacite - inscrits);
+    const absJusts = presences.filter(p => p.date_cours === dateStr && p.creneau_id === cr.id && p.statut === "absent_justifie");
+    const absJustsEleves = absJusts.map(p => { const el = eleves.find(e => e.id === p.eleve_id); return el || null; }).filter(Boolean);
+    const placesProvisoires = absJusts.length;
+    return { inscrits, placesLibres, placesProvisoires, absJustsEleves, total: placesLibres + placesProvisoires };
+  }, [affectations, presences, eleves]);
+
+  // Slots applicables pour une date
+  const getSlotsForDate = useCallback((dateStr) => {
+    const ctx = getDateContext(dateStr);
+    const dow = new Date(dateStr).getDay();
+    const dayName = JOURS_SEMAINE[dow];
+    if (ctx.type === "samedi_milieu" || dow === 0) return [];
+    let slots = [];
+    if (ctx.type === "vacances" && dow >= 1 && dow <= 5) {
+      slots = creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === ctx.vacance?.id && cr.semaine_vacances === ctx.semaine);
+    } else if (ctx.type === "hors_vacances" && dow >= 1 && dow <= 6) {
+      slots = creneaux.filter(cr => (cr.type_creneau || "regulier") === "regulier" && cr.jour === dayName);
+    }
+    return slots.sort((a, b) => (a.heure_debut || "").localeCompare(b.heure_debut || ""));
+  }, [creneaux]);
+
+  // Données vue jour
+  const jourData = useMemo(() => {
+    const slots = getSlotsForDate(selectedDate);
+    return slots.map(cr => ({ ...cr, dispo: getDispoSlot(cr, selectedDate) }))
+      .filter(cr => {
+        if (filterMode === "regulier") return cr.dispo.placesLibres > 0;
+        if (filterMode === "provisoire") return cr.dispo.placesProvisoires > 0;
+        return cr.dispo.total > 0;
+      });
+  }, [selectedDate, getSlotsForDate, getDispoSlot, filterMode]);
+
+  // Données vue semaine
+  const semaineDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
+  const semaineData = useMemo(() => semaineDates.map(dateStr => {
+    const ctx = getDateContext(dateStr);
+    const dow = new Date(dateStr).getDay();
+    const dayName = JOURS_SEMAINE[dow];
+    const slots = getSlotsForDate(dateStr);
+    const dispos = slots.map(cr => ({ ...cr, dispo: getDispoSlot(cr, dateStr) }));
+    const totalLibres = dispos.reduce((s, cr) => s + cr.dispo.placesLibres, 0);
+    const totalProv = dispos.reduce((s, cr) => s + cr.dispo.placesProvisoires, 0);
+    return { dateStr, dayName, dow, ctx, dispos: dispos.filter(cr => cr.dispo.total > 0), totalLibres, totalProv, isToday: dateStr === todayStr() };
+  }), [semaineDates, getSlotsForDate, getDispoSlot]);
+
+  const totalJour = jourData.reduce((s, cr) => ({ libres: s.libres + cr.dispo.placesLibres, prov: s.prov + cr.dispo.placesProvisoires }), { libres: 0, prov: 0 });
+  const moveWeek = (dir) => { const d = new Date(selectedDate); d.setDate(d.getDate() + dir * 7); setSelectedDate(d.toISOString().split("T")[0]); };
+  const wd0 = new Date(semaineDates[0]); const wd5 = new Date(semaineDates[5]);
+  const wLabel = `${wd0.getDate()} ${wd0.toLocaleDateString("fr-FR",{month:"short"})} — ${wd5.getDate()} ${wd5.toLocaleDateString("fr-FR",{month:"short",year:"numeric"})}`;
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+            <span style={{ fontSize:26 }}>🟢</span>
+            <h2 style={{ fontSize:22, fontWeight:800, color:C.text, margin:0 }}>Disponibilités</h2>
+          </div>
+          <p style={{ color:C.textMuted, fontSize:13, margin:"6px 0 0 38px" }}>Places disponibles à communiquer aux prospects</p>
+        </div>
+        {/* Toggle vue */}
+        <div style={{ display:"flex", gap:4, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}` }}>
+          {[["semaine","📅 Semaine"],["jour","📋 Jour"]].map(([k,l]) => (
+            <button key={k} onClick={() => setViewMode(k)} style={{ padding:"7px 16px", borderRadius:8, border:"none", cursor:"pointer", background:viewMode===k?C.accent:"transparent", color:viewMode===k?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>{l}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Navigation + filtres */}
+      <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:20, flexWrap:"wrap" }}>
+        <Btn small onClick={() => viewMode==="semaine" ? moveWeek(-1) : (()=>{ const d=new Date(selectedDate); d.setDate(d.getDate()-1); setSelectedDate(d.toISOString().split("T")[0]); })()} color={C.textMuted} outline>{viewMode==="semaine"?"◀◀":"◀"}</Btn>
+        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ padding:"10px 16px", background:C.surface, border:`2px solid ${C.border}`, borderRadius:10, color:C.text, fontSize:15, fontWeight:600 }} />
+        <Btn small onClick={() => viewMode==="semaine" ? moveWeek(1) : (()=>{ const d=new Date(selectedDate); d.setDate(d.getDate()+1); setSelectedDate(d.toISOString().split("T")[0]); })()} color={C.textMuted} outline>{viewMode==="semaine"?"▶▶":"▶"}</Btn>
+        <Btn small onClick={() => setSelectedDate(todayStr())} color={C.accent} outline>Aujourd'hui</Btn>
+        {viewMode === "jour" && (
+          <div style={{ display:"flex", gap:6, marginLeft:"auto" }}>
+            {[["tous","Tout"],["regulier","🟢 Régulières"],["provisoire","💬 Provisoires"]].map(([k,l]) => (
+              <button key={k} onClick={() => setFilterMode(k)} style={{ padding:"7px 14px", borderRadius:8, border:`2px solid ${filterMode===k?C.accent:C.border}`, cursor:"pointer", background:filterMode===k?C.accent+"15":"transparent", color:filterMode===k?C.accent:C.textMuted, fontSize:12, fontWeight:700 }}>{l}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── VUE SEMAINE ── */}
+      {viewMode === "semaine" && (
+        <div>
+          <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
+            <span style={{ fontSize:14, fontWeight:700, color:C.textMuted }}>{wLabel}</span>
+          </div>
+          {/* Légende */}
+          <div style={{ display:"flex", gap:16, marginBottom:16 }}>
+            {[[C.success,"🟢 Place régulière libre"],[C.warning,"💬 Place provisoire (absent justifié ce jour)"],[C.textDim,"— Aucune disponibilité"]].map(([col,lbl]) => (
+              <div key={lbl} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:col }}><div style={{ width:10, height:10, borderRadius:"50%", background:col, flexShrink:0 }} />{lbl}</div>
+            ))}
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(6, 1fr)", gap:10 }}>
+            {semaineData.map(day => (
+              <div key={day.dateStr}>
+                {/* En-tête jour */}
+                <div
+                  onClick={() => { setSelectedDate(day.dateStr); setViewMode("jour"); }}
+                  style={{ padding:"10px 8px", textAlign:"center", borderRadius:10, marginBottom:8, cursor:"pointer",
+                    background: day.isToday ? C.accent+"20" : C.surfaceLight,
+                    border:`2px solid ${day.isToday ? C.accent : C.border}` }}
+                >
+                  <div style={{ fontSize:10, fontWeight:700, color:day.isToday?C.accent:C.textMuted, textTransform:"uppercase", letterSpacing:1 }}>{day.dayName.substring(0,3)}</div>
+                  <div style={{ fontSize:18, fontWeight:800, color:day.isToday?C.accent:C.text }}>{new Date(day.dateStr).getDate()}</div>
+                  {/* Résumé dispo */}
+                  {day.ctx.type === "samedi_milieu" ? (
+                    <div style={{ fontSize:9, color:C.textDim, marginTop:4 }}>Vacances</div>
+                  ) : day.totalLibres + day.totalProv === 0 ? (
+                    <div style={{ fontSize:10, color:C.textDim, marginTop:4 }}>Complet</div>
+                  ) : (
+                    <div style={{ marginTop:6, display:"flex", flexDirection:"column", gap:3 }}>
+                      {day.totalLibres > 0 && <div style={{ fontSize:11, fontWeight:700, color:C.success, background:C.success+"15", borderRadius:6, padding:"2px 6px" }}>🟢 {day.totalLibres}</div>}
+                      {day.totalProv > 0 && <div style={{ fontSize:11, fontWeight:700, color:C.warning, background:C.warning+"15", borderRadius:6, padding:"2px 6px" }}>💬 {day.totalProv}</div>}
+                    </div>
+                  )}
+                </div>
+                {/* Détail créneaux */}
+                {day.dispos.map(cr => (
+                  <div key={cr.id}
+                    onClick={() => { setSelectedDate(day.dateStr); setViewMode("jour"); }}
+                    style={{ background:C.surface, border:`1px solid ${C.border}`, borderLeft:`4px solid ${cr.dispo.placesLibres>0?C.success:C.warning}`, borderRadius:8, padding:"7px 9px", marginBottom:5, cursor:"pointer", fontSize:12 }}>
+                    <div style={{ fontWeight:700, color:C.text }}>{(cr.heure_debut||"").substring(0,5)}–{(cr.heure_fin||"").substring(0,5)}</div>
+                    <div style={{ color:(FORFAITS[cr.mode]||{}).c||C.accent, fontWeight:600, fontSize:11 }}>{(FORFAITS[cr.mode]||{}).l||cr.mode}</div>
+                    <div style={{ display:"flex", gap:4, marginTop:4, flexWrap:"wrap" }}>
+                      {cr.dispo.placesLibres > 0 && <span style={{ fontSize:10, fontWeight:700, color:C.success, background:C.success+"15", borderRadius:4, padding:"1px 5px" }}>🟢 {cr.dispo.placesLibres}</span>}
+                      {cr.dispo.placesProvisoires > 0 && <span style={{ fontSize:10, fontWeight:700, color:C.warning, background:C.warning+"15", borderRadius:4, padding:"1px 5px" }}>💬 {cr.dispo.placesProvisoires}</span>}
+                    </div>
+                  </div>
+                ))}
+                {day.ctx.type !== "samedi_milieu" && day.dispos.length === 0 && day.ctx.type !== "samedi_milieu" && new Date(day.dateStr).getDay() !== 0 && (
+                  <div style={{ fontSize:10, color:C.textDim, textAlign:"center", padding:8 }}>—</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── VUE JOUR ── */}
+      {viewMode === "jour" && (() => {
+        const ctx = getDateContext(selectedDate);
+        const dow = new Date(selectedDate).getDay();
+        const dayName = JOURS_SEMAINE[dow];
+        const ctxLabel = ctx.type==="vacances"?`🏕️ Stage ${ctx.vacance.label} — Semaine ${ctx.semaine}`:ctx.type==="samedi_milieu"?"😴 Milieu vacances":"📚 Période scolaire";
+        const ctxColor = ctx.type==="vacances"?C.orange:ctx.type==="samedi_milieu"?C.textDim:C.accent;
+        return (
+          <div>
+            {/* Bandeau date */}
+            <div style={{ display:"flex", gap:12, alignItems:"center", marginBottom:16, flexWrap:"wrap" }}>
+              <div style={{ background:ctxColor+"15", border:`2px solid ${ctxColor}33`, borderRadius:10, padding:"10px 18px", fontSize:14, color:ctxColor, fontWeight:700 }}>
+                {dayName} {new Date(selectedDate).toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"})} — {ctxLabel}
+              </div>
+              {/* KPIs */}
+              {totalJour.libres > 0 && (
+                <div style={{ background:C.success+"15", border:`2px solid ${C.success}44`, borderRadius:10, padding:"10px 18px", display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:18 }}>🟢</span>
+                  <div><div style={{ fontSize:11, color:C.success, fontWeight:700, textTransform:"uppercase" }}>Places régulières libres</div><div style={{ fontSize:22, fontWeight:800, color:C.success }}>{totalJour.libres}</div></div>
+                </div>
+              )}
+              {totalJour.prov > 0 && (
+                <div style={{ background:C.warning+"15", border:`2px solid ${C.warning}44`, borderRadius:10, padding:"10px 18px", display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:18 }}>💬</span>
+                  <div><div style={{ fontSize:11, color:C.warning, fontWeight:700, textTransform:"uppercase" }}>Places provisoires libres</div><div style={{ fontSize:22, fontWeight:800, color:C.warning }}>{totalJour.prov}</div></div>
+                </div>
+              )}
+            </div>
+
+            {(ctx.type === "samedi_milieu" || (dow === 0)) ? (
+              <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:16, padding:50, textAlign:"center" }}>
+                <div style={{ fontSize:40, marginBottom:12 }}>😴</div>
+                <div style={{ color:C.textMuted }}>Pas de cours ce jour</div>
+              </div>
+            ) : jourData.length === 0 ? (
+              <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:16, padding:50, textAlign:"center" }}>
+                <div style={{ fontSize:40, marginBottom:12 }}>✅</div>
+                <div style={{ fontWeight:700, color:C.text, fontSize:16, marginBottom:8 }}>Tous les créneaux sont complets</div>
+                <div style={{ color:C.textMuted, fontSize:13 }}>Aucune place disponible ce jour pour un nouveau prospect</div>
+              </div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                {jourData.map(cr => (
+                  <div key={cr.id} style={{ background:C.surface, border:`2px solid ${C.border}`, borderRadius:16, padding:20, boxShadow:"0 2px 8px rgba(0,0,0,0.04)", borderLeft:`5px solid ${cr.dispo.placesLibres>0?C.success:C.warning}` }}>
+                    {/* Header créneau */}
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:8 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <span style={{ fontWeight:800, fontSize:18, color:C.text }}>{(cr.heure_debut||"").substring(0,5)} — {(cr.heure_fin||"").substring(0,5)}</span>
+                        <Badge color={(FORFAITS[cr.mode]||{}).c||C.accent}>{(FORFAITS[cr.mode]||{}).l||cr.mode} · {tarifMode(cr.mode)}€/h</Badge>
+                        <Badge color={C.textMuted}>{cr.dispo.inscrits}/{cr.capacite} inscrits</Badge>
+                        {cr.type_creneau==="stage" && <Badge color={C.orange}>🏕️ Stage</Badge>}
+                      </div>
+                      <div style={{ fontWeight:700, fontSize:14, color:cr.dispo.total>0?C.success:C.textDim }}>
+                        {cr.dispo.total} place{cr.dispo.total>1?"s":""} dispo
+                      </div>
+                    </div>
+
+                    {/* Détail disponibilités */}
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                      {/* Places régulières libres */}
+                      <div style={{ background:cr.dispo.placesLibres>0?C.success+"10":C.surfaceLight, border:`2px solid ${cr.dispo.placesLibres>0?C.success+"44":C.border}`, borderRadius:12, padding:14 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                          <span style={{ fontSize:18 }}>🟢</span>
+                          <div>
+                            <div style={{ fontSize:10, fontWeight:700, color:cr.dispo.placesLibres>0?C.success:C.textDim, textTransform:"uppercase" }}>Places régulières libres</div>
+                            <div style={{ fontSize:24, fontWeight:800, color:cr.dispo.placesLibres>0?C.success:C.textDim }}>{cr.dispo.placesLibres}</div>
+                          </div>
+                        </div>
+                        {cr.dispo.placesLibres > 0 ? (
+                          <div style={{ fontSize:11, color:C.success }}>✓ Inscription permanente possible</div>
+                        ) : (
+                          <div style={{ fontSize:11, color:C.textDim }}>Créneau complet en inscription régulière</div>
+                        )}
+                      </div>
+
+                      {/* Places provisoires */}
+                      <div style={{ background:cr.dispo.placesProvisoires>0?C.warning+"10":C.surfaceLight, border:`2px solid ${cr.dispo.placesProvisoires>0?C.warning+"44":C.border}`, borderRadius:12, padding:14 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
+                          <span style={{ fontSize:18 }}>💬</span>
+                          <div>
+                            <div style={{ fontSize:10, fontWeight:700, color:cr.dispo.placesProvisoires>0?C.warning:C.textDim, textTransform:"uppercase" }}>Places provisoires</div>
+                            <div style={{ fontSize:24, fontWeight:800, color:cr.dispo.placesProvisoires>0?C.warning:C.textDim }}>{cr.dispo.placesProvisoires}</div>
+                          </div>
+                        </div>
+                        {cr.dispo.placesProvisoires > 0 ? (
+                          <div>
+                            <div style={{ fontSize:11, color:C.warning, marginBottom:6 }}>Ce jour uniquement — élève{cr.dispo.placesProvisoires>1?"s":""} absent{cr.dispo.placesProvisoires>1?"s":""} prévenu{cr.dispo.placesProvisoires>1?"s":""} :</div>
+                            {cr.dispo.absJustsEleves.map(el => (
+                              <div key={el.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 8px", background:C.warning+"15", borderRadius:6, marginTop:3 }}>
+                                <span style={{ fontSize:13 }}>👤</span>
+                                <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{el.prenom} {el.nom}</span>
+                                <Badge color={C.purple}>{el.classe}</Badge>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize:11, color:C.textDim }}>Aucune absence prévue</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+    </div>
+  );
+};
+
 // ═══ MAIN ═══
-const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"}];
+const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"},{key:"disponibilites",icon:"🟢",label:"Disponibilités"}];
 
 export default function App() {
   const [page, setPage] = useState("dashboard"); const [pageParams, setPageParams] = useState({});
@@ -1052,6 +1321,7 @@ export default function App() {
       case "eleves": return <ElevesPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} refresh={loadData} initialAction={pageParams.action} initialOpenId={pageParams.openId} />;
       case "creneaux": return <CreneauxPage creneaux={creneaux} affectations={affectations} eleves={eleves} refresh={loadData} />;
       case "paiements": return <PaiementsPage eleves={eleves} paiements={paiements} refresh={loadData} />;
+      case "disponibilites": return <DisponibilitesPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} />;
       default: return null;
     }
   };
