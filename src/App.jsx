@@ -2041,8 +2041,253 @@ const SMSPage = ({ eleves, suiviMensuel, paiements }) => {
   );
 };
 
+// ═══ MODULE 6 : FINANCE ═══
+const FinancePage = ({ eleves, suiviMensuel, paiements }) => {
+  const [tab, setTab] = useState("mensuel");
+  const [moisSelect, setMoisSelect] = useState(getMoisActuel());
+  const [expanded, setExpanded] = useState(null);
+  const [smsState, setSmsState] = useState({});
+  const [smsMsg, setSmsMsg] = useState("Bonjour {nom_famille}, votre solde Bulles de Savoir est de {montant_du}€. Merci de régulariser votre situation. BdS Hassan");
+  const [relanceAll, setRelanceAll] = useState(false);
+
+  const familles = useMemo(() => {
+    const fam = {};
+    eleves.filter(e => e.actif).forEach(el => {
+      const fkey = el.nom_parent1?.trim() || `${el.prenom} ${el.nom}`;
+      if (!fam[fkey]) fam[fkey] = { key: fkey, label: fkey, tel: el.tel_parent1 || el.tel_parent2 || "", students: [], factureTotal: 0, payeTotal: 0, factureMois: {} };
+      fam[fkey].students.push(el);
+      suiviMensuel.filter(s => s.eleve_id === el.id).forEach(s => {
+        const m = s.mois; const v = parseFloat(s.montant_facture || 0);
+        fam[fkey].factureMois[m] = (fam[fkey].factureMois[m] || 0) + v;
+        fam[fkey].factureTotal += v;
+      });
+      fam[fkey].payeTotal += paiements.filter(p => p.eleve_id === el.id).reduce((s, x) => s + parseFloat(x.montant || 0), 0);
+    });
+    return Object.values(fam).map(f => ({ ...f, solde: f.payeTotal - f.factureTotal })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [eleves, suiviMensuel, paiements]);
+
+  const impayes = useMemo(() => familles.filter(f => f.solde < -0.01).sort((a, b) => a.solde - b.solde), [familles]);
+  const famMois = useMemo(() => familles.filter(f => (f.factureMois[moisSelect] || 0) > 0), [familles, moisSelect]);
+  const totalFactureMois = famMois.reduce((s, f) => s + (f.factureMois[moisSelect] || 0), 0);
+  const totalImpayes = impayes.reduce((s, f) => s + f.solde, 0);
+
+  const detailMois = (fam, mois) => fam.students.map(el => {
+    const v = suiviMensuel.filter(s => s.eleve_id === el.id && s.mois === mois).reduce((s, x) => s + parseFloat(x.montant_facture || 0), 0);
+    return { ...el, facture: v };
+  }).filter(el => el.facture > 0);
+
+  const printInvoice = (fam, mois) => {
+    const details = detailMois(fam, mois);
+    const totalMois = details.reduce((s, el) => s + el.facture, 0);
+    const pays = paiements.filter(p => fam.students.some(el => el.id === p.eleve_id)).sort((a, b) => (a.date_paiement || "").localeCompare(b.date_paiement || ""));
+    const w = window.open("", "_blank");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Facture BdS - ${fam.label} - ${mois}</title><style>
+      *{font-family:'Segoe UI',sans-serif;margin:0;padding:0;box-sizing:border-box}body{padding:40px;color:#1a1a2e}
+      .hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;border-bottom:3px solid #e91e63;padding-bottom:20px}
+      .logo{font-size:24px;font-weight:800;color:#e91e63}.logo-sub{font-size:12px;color:#888;margin-top:4px}
+      .info{text-align:right;font-size:13px;color:#555}.sec{font-size:13px;font-weight:700;color:#e91e63;text-transform:uppercase;letter-spacing:1px;margin:24px 0 10px}
+      table{width:100%;border-collapse:collapse}th{background:#fce4ec;padding:10px 12px;text-align:left;font-size:12px;font-weight:700;color:#e91e63}
+      td{padding:10px 12px;border-bottom:1px solid #f5f5f5;font-size:13px}.r{text-align:right;font-weight:600}
+      .tr td{font-weight:800;font-size:14px;background:#fff8f9;border-top:2px solid #e91e63}
+      .sb{margin-top:24px;padding:16px 20px;border-radius:12px;display:flex;justify-content:space-between;align-items:center}
+      .ok{background:#e8f5e9;color:#2e7d32}.du{background:#fce4ec;color:#c62828}
+      .ft{margin-top:40px;padding-top:16px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
+      @media print{body{padding:20px}}
+    </style></head><body>
+      <div class="hdr"><div><div class="logo">🎓 Bulles de Savoir</div><div class="logo-sub">Centre de soutien scolaire</div></div>
+      <div class="info"><strong>Récapitulatif ${mois}</strong><br>Édité le ${new Date().toLocaleDateString("fr-FR")}<br><br><strong>Famille : ${fam.label}</strong></div></div>
+      <div class="sec">Séances de ${mois}</div>
+      <table><thead><tr><th>Élève</th><th>Forfait</th><th class="r">Montant</th></tr></thead><tbody>
+        ${details.map(el => `<tr><td>${el.prenom} ${el.nom}</td><td>${(FORFAITS[el.forfait] || { l: el.forfait || "—" }).l}</td><td class="r">${el.facture.toFixed(2)} €</td></tr>`).join("")}
+        <tr class="tr"><td colspan="2">Total facturé ${mois}</td><td class="r">${totalMois.toFixed(2)} €</td></tr>
+      </tbody></table>
+      <div class="sec">Historique des paiements</div>
+      ${pays.length > 0 ? `<table><thead><tr><th>Date</th><th>Mois</th><th>Mode</th><th class="r">Montant</th></tr></thead><tbody>
+        ${pays.map(p => `<tr><td>${p.date_paiement ? new Date(p.date_paiement).toLocaleDateString("fr-FR") : "—"}</td><td>${p.mois_concerne || "—"}</td><td>${p.mode_paiement || "—"}</td><td class="r">${parseFloat(p.montant).toFixed(2)} €</td></tr>`).join("")}
+      </tbody></table>` : `<p style="color:#aaa;font-size:13px">Aucun paiement enregistré.</p>`}
+      <div class="sb ${fam.solde >= 0 ? "ok" : "du"}">
+        <span style="font-weight:700;font-size:15px">${fam.solde >= 0 ? "✓ Compte à jour" : "⚠ Solde dû"}</span>
+        <span style="font-weight:800;font-size:18px">${fam.solde >= 0 ? "+" : ""}${fam.solde.toFixed(2)} €</span>
+      </div>
+      <div class="ft">Bulles de Savoir · Document généré automatiquement · ${new Date().toLocaleDateString("fr-FR")}</div>
+    </body></html>`);
+    w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
+  };
+
+  const sendRelanceSMS = async (fam) => {
+    const phone = formatPhone(fam.tel);
+    if (!phone) { setSmsState(s => ({ ...s, [fam.key]: "no_tel" })); return; }
+    setSmsState(s => ({ ...s, [fam.key]: "sending" }));
+    const content = smsMsg.replace(/{nom_famille}/g, fam.label).replace(/{montant_du}/g, Math.abs(fam.solde).toFixed(0)).replace(/{date}/g, new Date().toLocaleDateString("fr-FR"));
+    try {
+      const r = await fetch("https://api.brevo.com/v3/transactionalSMS/sms", { method: "POST", headers: { "api-key": BREVO_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ sender: BREVO_SENDER, recipient: phone, content, type: "transactional" }) });
+      setSmsState(s => ({ ...s, [fam.key]: r.ok ? "ok" : "err" }));
+    } catch { setSmsState(s => ({ ...s, [fam.key]: "err" })); }
+  };
+
+  const sendAllRelances = async () => {
+    setRelanceAll(true);
+    for (const fam of impayes) { if (smsState[fam.key] !== "ok") await sendRelanceSMS(fam); }
+    setRelanceAll(false);
+  };
+
+  const tabBtn = (active) => ({ padding: "10px 22px", borderRadius: 10, border: "none", cursor: "pointer", fontWeight: active ? 700 : 500, background: active ? C.accent : C.surface, color: active ? "#fff" : C.text, fontSize: 14, transition: "all 0.15s" });
+
+  return (
+    <div style={{ maxWidth: 1000, margin: "0 auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginBottom: 24 }}>
+        {[{ icon: "💶", label: `Facturé ${moisSelect}`, val: `${totalFactureMois.toFixed(0)} €`, c: C.blue },
+          { icon: "🏦", label: "Total impayés", val: `${Math.abs(totalImpayes).toFixed(0)} €`, c: impayes.length > 0 ? C.danger : C.success },
+          { icon: "👨‍👩‍👧", label: "Familles en retard", val: `${impayes.length}`, c: impayes.length > 0 ? C.warning : C.success }
+        ].map(k => (
+          <div key={k.label} style={{ background: C.surface, borderRadius: 16, padding: "20px 24px", border: `1px solid ${C.border}`, borderLeft: `4px solid ${k.c}` }}>
+            <div style={{ fontSize: 22, marginBottom: 8 }}>{k.icon}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: k.c }}>{k.val}</div>
+            <div style={{ fontSize: 13, color: C.textMuted, marginTop: 4 }}>{k.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+        <button style={tabBtn(tab === "mensuel")} onClick={() => setTab("mensuel")}>📅 Récap mensuel</button>
+        <button style={tabBtn(tab === "impayes")} onClick={() => setTab("impayes")}>⚠️ Impayés ({impayes.length})</button>
+      </div>
+
+      {tab === "mensuel" && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+            <span style={{ fontWeight: 600, color: C.textMuted, fontSize: 14 }}>Mois :</span>
+            <select value={moisSelect} onChange={e => setMoisSelect(e.target.value)} style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.surface, color: C.text, fontSize: 14, fontWeight: 600 }}>
+              {MOIS_ORDER.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <span style={{ fontSize: 13, color: C.textMuted }}>{famMois.length} famille{famMois.length > 1 ? "s" : ""} · {totalFactureMois.toFixed(0)} € facturés</span>
+          </div>
+          {famMois.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40, color: C.textMuted, fontSize: 14, background: C.surface, borderRadius: 16, border: `1px solid ${C.border}` }}>Aucune séance facturée pour {moisSelect}.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {famMois.map(fam => {
+                const isOpen = expanded === fam.key;
+                const details = isOpen ? detailMois(fam, moisSelect) : [];
+                return (
+                  <div key={fam.key} style={{ background: C.surface, borderRadius: 14, border: `1px solid ${C.border}`, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", cursor: "pointer" }} onClick={() => setExpanded(isOpen ? null : fam.key)}>
+                      <span style={{ fontSize: 16 }}>{isOpen ? "▼" : "▶"}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{fam.label}</div>
+                        <div style={{ fontSize: 12, color: C.textMuted }}>{fam.students.length} élève{fam.students.length > 1 ? "s" : ""} · {fam.students.map(e => `${e.prenom} ${e.nom}`).join(", ")}</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontWeight: 800, fontSize: 16, color: C.blue }}>{(fam.factureMois[moisSelect] || 0).toFixed(0)} €</div>
+                        <div style={{ fontSize: 12, color: fam.solde >= 0 ? C.success : C.danger, fontWeight: 600 }}>Solde global : {fam.solde >= 0 ? "+" : ""}{fam.solde.toFixed(0)} €</div>
+                      </div>
+                      <button style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: C.accent + "15", color: C.accent, fontWeight: 700, cursor: "pointer", fontSize: 13, marginLeft: 8 }}
+                        onClick={e => { e.stopPropagation(); printInvoice(fam, moisSelect); }}>🖨️ Facture</button>
+                    </div>
+                    {isOpen && (
+                      <div style={{ borderTop: `1px solid ${C.border}`, background: C.bg, padding: "12px 18px" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                          <thead><tr style={{ color: C.textMuted, fontSize: 12, fontWeight: 600 }}>
+                            <th style={{ textAlign: "left", padding: "6px 10px" }}>Élève</th>
+                            <th style={{ textAlign: "left", padding: "6px 10px" }}>Forfait</th>
+                            <th style={{ textAlign: "right", padding: "6px 10px" }}>Facturé {moisSelect}</th>
+                          </tr></thead>
+                          <tbody>
+                            {details.map(el => (
+                              <tr key={el.id}>
+                                <td style={{ padding: "8px 10px", fontWeight: 600, fontSize: 14 }}>{el.prenom} {el.nom}</td>
+                                <td style={{ padding: "8px 10px" }}><Badge color={(FORFAITS[el.forfait] || {}).c || C.textMuted}>{(FORFAITS[el.forfait] || { l: el.forfait || "—" }).l}</Badge></td>
+                                <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: C.blue, fontSize: 14 }}>{el.facture.toFixed(0)} €</td>
+                              </tr>
+                            ))}
+                            <tr style={{ borderTop: `2px solid ${C.border}` }}>
+                              <td colSpan={2} style={{ padding: "8px 10px", fontSize: 14, fontWeight: 800 }}>Total</td>
+                              <td style={{ padding: "8px 10px", textAlign: "right", fontSize: 15, fontWeight: 800, color: C.accent }}>{(fam.factureMois[moisSelect] || 0).toFixed(0)} €</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "impayes" && (
+        <div>
+          {impayes.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 50, color: C.success, fontSize: 16, fontWeight: 700, background: C.success + "10", borderRadius: 16, border: `2px solid ${C.success}33` }}>
+              ✅ Aucun impayé — toutes les familles sont à jour !
+            </div>
+          ) : (
+            <>
+              <div style={{ background: C.surface, borderRadius: 14, border: `1px solid ${C.border}`, padding: 18, marginBottom: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.textMuted, marginBottom: 8 }}>Message de relance SMS</div>
+                <textarea value={smsMsg} onChange={e => setSmsMsg(e.target.value)} rows={3}
+                  style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text, fontSize: 13, resize: "vertical", fontFamily: "inherit" }} />
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 6 }}>
+                  Variables disponibles :{" "}
+                  {["{nom_famille}", "{montant_du}", "{date}"].map(v => <code key={v} style={{ background: C.surfaceLight, padding: "2px 6px", borderRadius: 4, marginRight: 6 }}>{v}</code>)}
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <button disabled={relanceAll} onClick={sendAllRelances}
+                    style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: C.danger, color: "#fff", fontWeight: 700, cursor: relanceAll ? "not-allowed" : "pointer", fontSize: 14, opacity: relanceAll ? 0.6 : 1 }}>
+                    {relanceAll ? "⏳ Envoi en cours..." : `📱 Relancer les ${impayes.length} famille${impayes.length > 1 ? "s" : ""} en retard`}
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {impayes.map(fam => {
+                  const st = smsState[fam.key];
+                  const hasPhone = !!formatPhone(fam.tel);
+                  return (
+                    <div key={fam.key} style={{ background: C.surface, borderRadius: 14, border: `1px solid ${C.border}`, padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{fam.label}</div>
+                        <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>{fam.students.length} élève{fam.students.length > 1 ? "s" : ""} · {fam.students.map(e => `${e.prenom} ${e.nom}`).join(", ")}</div>
+                        {fam.tel ? <div style={{ fontSize: 12, color: C.textMuted, marginTop: 2 }}>📞 {fam.tel}{!hasPhone && <span style={{ color: C.danger }}> (format invalide)</span>}</div>
+                          : <div style={{ fontSize: 12, color: C.danger, marginTop: 2 }}>⚠ Aucun téléphone enregistré</div>}
+                      </div>
+                      <div style={{ textAlign: "right", minWidth: 90 }}>
+                        <div style={{ fontSize: 11, color: C.textMuted }}>Facturé</div>
+                        <div style={{ fontWeight: 700, color: C.blue }}>{fam.factureTotal.toFixed(0)} €</div>
+                      </div>
+                      <div style={{ textAlign: "right", minWidth: 90 }}>
+                        <div style={{ fontSize: 11, color: C.textMuted }}>Payé</div>
+                        <div style={{ fontWeight: 700, color: C.success }}>{fam.payeTotal.toFixed(0)} €</div>
+                      </div>
+                      <div style={{ textAlign: "right", minWidth: 100 }}>
+                        <div style={{ fontSize: 11, color: C.textMuted }}>Solde</div>
+                        <div style={{ fontWeight: 800, fontSize: 16, color: C.danger }}>{fam.solde.toFixed(0)} €</div>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 130 }}>
+                        <button disabled={!hasPhone || st === "sending" || st === "ok"} onClick={() => sendRelanceSMS(fam)}
+                          style={{ padding: "8px 12px", borderRadius: 8, border: "none", fontWeight: 700, cursor: (!hasPhone || st === "ok") ? "not-allowed" : "pointer", fontSize: 12,
+                            background: st === "ok" ? C.success : st === "err" ? C.danger : st === "sending" ? C.textMuted : C.warning, color: "#fff", opacity: (!hasPhone || st === "sending") ? 0.6 : 1 }}>
+                          {st === "ok" ? "✅ SMS envoyé" : st === "err" ? "❌ Échec" : st === "no_tel" ? "📵 Pas de tél" : st === "sending" ? "⏳..." : "📱 SMS Relance"}
+                        </button>
+                        <button onClick={() => printInvoice(fam, moisSelect)}
+                          style={{ padding: "7px 12px", borderRadius: 8, border: "none", background: C.accent + "15", color: C.accent, fontWeight: 700, cursor: "pointer", fontSize: 12 }}>
+                          🖨️ Facture
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ═══ MAIN ═══
-const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"},{key:"disponibilites",icon:"🟢",label:"Disponibilités"},{key:"sms",icon:"📱",label:"SMS Groupés"}];
+const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"},{key:"disponibilites",icon:"🟢",label:"Disponibilités"},{key:"sms",icon:"📱",label:"SMS Groupés"},{key:"finance",icon:"💶",label:"Finance"}];
 
 export default function App() {
   const [page, setPage] = useState("dashboard"); const [pageParams, setPageParams] = useState({});
@@ -2062,6 +2307,7 @@ export default function App() {
       case "paiements": return <PaiementsPage eleves={eleves} paiements={paiements} refresh={loadData} />;
       case "disponibilites": return <DisponibilitesPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} refresh={loadData} />;
       case "sms": return <SMSPage eleves={eleves} suiviMensuel={suiviMensuel} paiements={paiements} />;
+      case "finance": return <FinancePage eleves={eleves} suiviMensuel={suiviMensuel} paiements={paiements} />;
       default: return null;
     }
   };
