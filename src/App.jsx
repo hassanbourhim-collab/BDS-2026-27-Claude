@@ -1721,8 +1721,328 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
   );
 };
 
+// ═══ SMS GROUPÉS ═══
+const BREVO_KEY = import.meta.env.VITE_BREVO_KEY || "";
+const BREVO_SENDER = "BdS Hassan";
+const SMS_VARS = [
+  ["{prenom_eleve}", "Prénom de l'élève"],
+  ["{nom_famille}", "Nom de famille / parent"],
+  ["{montant_du}", "Montant dû (solde négatif)"],
+  ["{date}", "Date du jour"],
+];
+
+const formatPhone = (tel) => {
+  if (!tel) return null;
+  const clean = tel.replace(/[\s\-\.\/\(\)]/g, "");
+  if (clean.startsWith("+")) return clean;
+  if (clean.startsWith("0")) return "+33" + clean.slice(1);
+  return null;
+};
+
+const SMSPage = ({ eleves, suiviMensuel, paiements }) => {
+  const [selected, setSelected] = useState(new Set());
+  const [message, setMessage] = useState("");
+  const [search, setSearch] = useState("");
+  const [filterGroupe, setFilterGroupe] = useState("tous");
+  const [previewIdx, setPreviewIdx] = useState(0);
+  const [sending, setSending] = useState(false);
+  const [results, setResults] = useState(null); // null | []
+  const [step, setStep] = useState("compose"); // "compose" | "preview" | "done"
+  const msgRef = useState(null);
+
+  const getSolde = useCallback((eid) => {
+    const f = suiviMensuel.filter(s => s.eleve_id === eid).reduce((s, x) => s + parseFloat(x.montant_facture || 0), 0);
+    const p = paiements.filter(x => x.eleve_id === eid).reduce((s, x) => s + parseFloat(x.montant || 0), 0);
+    return p - f;
+  }, [suiviMensuel, paiements]);
+
+  const personalize = useCallback((msg, el) => {
+    const solde = getSolde(el.id);
+    const montantDu = solde < 0 ? Math.abs(solde).toFixed(0) + "€" : "0€";
+    return msg
+      .replace(/{prenom_eleve}/g, el.prenom)
+      .replace(/{nom_famille}/g, el.nom_parent1 || el.nom)
+      .replace(/{montant_du}/g, montantDu)
+      .replace(/{date}/g, new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" }));
+  }, [getSolde]);
+
+  // Élèves actifs avec un numéro valide
+  const eligibles = useMemo(() => eleves
+    .filter(e => e.actif && formatPhone(e.tel_parent1))
+    .filter(e => {
+      if (filterGroupe !== "tous") return e.forfait === filterGroupe;
+      return true;
+    })
+    .filter(e => !search || `${e.prenom} ${e.nom}`.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => a.nom.localeCompare(b.nom)),
+    [eleves, filterGroupe, search]
+  );
+
+  const sansPhone = useMemo(() => eleves.filter(e => e.actif && !formatPhone(e.tel_parent1)), [eleves]);
+  const selectedList = useMemo(() => [...selected].map(id => eleves.find(e => e.id === id)).filter(Boolean), [selected, eleves]);
+  const charCount = message.length;
+  const smsCount = Math.ceil(charCount / 160) || 1;
+
+  const toggleAll = () => {
+    if (selected.size === eligibles.length) setSelected(new Set());
+    else setSelected(new Set(eligibles.map(e => e.id)));
+  };
+
+  const insertVar = (v) => {
+    const ta = document.getElementById("sms-textarea");
+    if (!ta) { setMessage(m => m + v); return; }
+    const start = ta.selectionStart; const end = ta.selectionEnd;
+    const newMsg = message.slice(0, start) + v + message.slice(end);
+    setMessage(newMsg);
+    setTimeout(() => { ta.focus(); ta.setSelectionRange(start + v.length, start + v.length); }, 0);
+  };
+
+  const sendAll = async () => {
+    setSending(true);
+    const res = [];
+    for (const el of selectedList) {
+      const phone = formatPhone(el.tel_parent1);
+      const content = personalize(message, el);
+      try {
+        const r = await fetch("https://api.brevo.com/v3/transactionalSMS/sms", {
+          method: "POST",
+          headers: { "api-key": BREVO_KEY, "Content-Type": "application/json" },
+          body: JSON.stringify({ sender: BREVO_SENDER, recipient: phone, content, type: "transactional" })
+        });
+        const data = await r.json();
+        res.push({ el, ok: r.ok, info: r.ok ? `Envoyé → ${phone}` : (data?.message || "Erreur API") });
+      } catch (err) {
+        res.push({ el, ok: false, info: err.message });
+      }
+    }
+    setResults(res);
+    setSending(false);
+    setStep("done");
+  };
+
+  const previewEl = selectedList[previewIdx] || selectedList[0];
+
+  return (
+    <div>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 26 }}>📱</span>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0 }}>SMS Groupés</h2>
+          {selected.size > 0 && <Badge color={C.pink}>{selected.size} destinataire{selected.size > 1 ? "s" : ""}</Badge>}
+        </div>
+        {/* Étapes */}
+        <div style={{ display: "flex", gap: 4, background: C.surfaceLight, borderRadius: 10, padding: 4, border: `1px solid ${C.border}` }}>
+          {[["compose", "✏️ Rédiger"], ["preview", "👁️ Aperçu"], ["done", "✅ Résultat"]].map(([k, l]) => (
+            <button key={k} onClick={() => step !== "done" && setStep(k)}
+              style={{ padding: "7px 14px", borderRadius: 8, border: "none", cursor: step === "done" && k !== "done" ? "default" : "pointer", background: step === k ? C.pink : "transparent", color: step === k ? "#fff" : C.textMuted, fontSize: 12, fontWeight: 700 }}>{l}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 20, alignItems: "start" }}>
+
+        {/* ── PANNEAU GAUCHE : destinataires ── */}
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 18, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Destinataires</span>
+            <button onClick={toggleAll} style={{ fontSize: 12, color: C.accent, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+              {selected.size === eligibles.length ? "Tout décocher" : "Tout cocher"}
+            </button>
+          </div>
+
+          {/* Recherche + filtre */}
+          <div style={{ position: "relative", marginBottom: 10 }}>
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", opacity: 0.4 }}>🔍</span>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher…"
+              style={{ width: "100%", padding: "9px 12px 9px 36px", background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13, boxSizing: "border-box" }} />
+          </div>
+          <select value={filterGroupe} onChange={e => setFilterGroupe(e.target.value)}
+            style={{ width: "100%", padding: "8px 12px", background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13, marginBottom: 12 }}>
+            <option value="tous">Tous les forfaits</option>
+            {Object.entries(FORFAITS).map(([k, v]) => <option key={k} value={k}>{v.l}</option>)}
+          </select>
+
+          {/* Liste */}
+          <div style={{ maxHeight: 380, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+            {eligibles.map(el => {
+              const isSelected = selected.has(el.id);
+              const solde = getSolde(el.id);
+              return (
+                <div key={el.id} onClick={() => {
+                  const ns = new Set(selected);
+                  isSelected ? ns.delete(el.id) : ns.add(el.id);
+                  setSelected(ns);
+                }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 8, cursor: "pointer", background: isSelected ? C.pink + "12" : "transparent", border: `1px solid ${isSelected ? C.pink + "44" : C.border}`, transition: "all 0.1s" }}>
+                  <div style={{ width: 18, height: 18, borderRadius: 4, border: `2px solid ${isSelected ? C.pink : C.border}`, background: isSelected ? C.pink : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    {isSelected && <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{el.prenom} {el.nom}</div>
+                    <div style={{ fontSize: 11, color: C.textMuted }}>{el.classe} · {formatPhone(el.tel_parent1)}</div>
+                  </div>
+                  {solde < 0 && <Badge color={C.danger}>{Math.abs(solde).toFixed(0)}€</Badge>}
+                </div>
+              );
+            })}
+            {eligibles.length === 0 && <div style={{ color: C.textDim, fontSize: 13, textAlign: "center", padding: 20 }}>Aucun élève trouvé</div>}
+          </div>
+
+          {/* Avertissement sans téléphone */}
+          {sansPhone.length > 0 && (
+            <div style={{ marginTop: 12, background: C.warning + "12", borderRadius: 8, padding: "8px 12px", fontSize: 11, color: C.warning }}>
+              ⚠️ {sansPhone.length} élève{sansPhone.length > 1 ? "s" : ""} sans numéro : {sansPhone.slice(0, 3).map(e => e.prenom).join(", ")}{sansPhone.length > 3 ? "…" : ""}
+            </div>
+          )}
+        </div>
+
+        {/* ── PANNEAU DROIT : rédaction / aperçu / résultats ── */}
+        <div>
+
+          {/* ÉTAPE RÉDACTION */}
+          {step === "compose" && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 18, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: C.text, marginBottom: 14 }}>✏️ Message</div>
+
+              {/* Boutons variables */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 700, marginBottom: 6, textTransform: "uppercase" }}>Variables automatiques</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {SMS_VARS.map(([v, l]) => (
+                    <button key={v} onClick={() => insertVar(v)} title={l}
+                      style={{ padding: "5px 12px", borderRadius: 20, border: `2px solid ${C.pink}44`, background: C.pink + "10", color: C.pink, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>{v}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Textarea */}
+              <textarea
+                id="sms-textarea"
+                value={message}
+                onChange={e => setMessage(e.target.value)}
+                placeholder="Bonjour {prenom_eleve}, votre solde BdS est de {montant_du}. Merci. BdS Hassan"
+                style={{ width: "100%", minHeight: 120, padding: "12px 14px", background: C.surfaceLight, border: `2px solid ${C.border}`, borderRadius: 10, color: C.text, fontSize: 14, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, marginBottom: 16 }}>
+                <span style={{ fontSize: 12, color: charCount > 160 ? C.warning : C.textDim }}>{charCount} caractère{charCount > 1 ? "s" : ""} · {smsCount} SMS{smsCount > 1 ? " (message long)" : ""}</span>
+                <span style={{ fontSize: 12, color: C.textMuted }}>Expéditeur : <strong>{BREVO_SENDER}</strong></span>
+              </div>
+
+              {/* Aperçu rapide */}
+              {previewEl && message && (
+                <div style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 700, marginBottom: 6 }}>APERÇU — {previewEl.prenom} {previewEl.nom}</div>
+                  <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{personalize(message, previewEl)}</div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <Btn onClick={() => setStep("preview")} disabled={!message || selected.size === 0} color={C.pink}>
+                  👁️ Aperçu complet ({selected.size})
+                </Btn>
+              </div>
+            </div>
+          )}
+
+          {/* ÉTAPE APERÇU */}
+          {step === "preview" && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 18, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: C.text }}>👁️ Aperçu des messages ({selectedList.length})</div>
+                <Btn small onClick={() => setStep("compose")} color={C.textMuted} outline>← Modifier</Btn>
+              </div>
+
+              {/* Navigation destinataires */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+                {selectedList.map((el, i) => (
+                  <button key={el.id} onClick={() => setPreviewIdx(i)}
+                    style={{ padding: "5px 12px", borderRadius: 20, border: `2px solid ${i === previewIdx ? C.pink : C.border}`, background: i === previewIdx ? C.pink + "15" : "transparent", color: i === previewIdx ? C.pink : C.textMuted, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                    {el.prenom}
+                  </button>
+                ))}
+              </div>
+
+              {/* Message personnalisé */}
+              {previewEl && (
+                <div style={{ background: C.surfaceLight, borderRadius: 12, padding: 16, marginBottom: 16, border: `2px solid ${C.pink}33` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: C.text }}>{previewEl.prenom} {previewEl.nom}</div>
+                      <div style={{ fontSize: 12, color: C.textMuted }}>{formatPhone(previewEl.tel_parent1)}</div>
+                    </div>
+                    <Badge color={C.textMuted}>{personalize(message, previewEl).length} car.</Badge>
+                  </div>
+                  {/* SMS bubble */}
+                  <div style={{ background: C.pink, borderRadius: "18px 18px 4px 18px", padding: "12px 16px", maxWidth: "80%", marginLeft: "auto" }}>
+                    <div style={{ fontSize: 14, color: "#fff", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{personalize(message, previewEl)}</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: C.textMuted, textAlign: "right", marginTop: 6 }}>De : {BREVO_SENDER}</div>
+                </div>
+              )}
+
+              {/* Récap envoi */}
+              <div style={{ background: C.pink + "10", border: `2px solid ${C.pink}33`, borderRadius: 10, padding: "12px 16px", marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.pink, marginBottom: 4 }}>Récapitulatif de l'envoi</div>
+                <div style={{ fontSize: 12, color: C.textMuted }}>{selectedList.length} destinataire{selectedList.length > 1 ? "s" : ""} · {smsCount} SMS/destinataire · Expéditeur : {BREVO_SENDER}</div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                <Btn onClick={() => setStep("compose")} color={C.textMuted} outline>← Modifier</Btn>
+                <Btn onClick={sendAll} disabled={sending} color={C.pink}>
+                  {sending ? `⏳ Envoi en cours (${results ? results.length : 0}/${selectedList.length})…` : `📱 Envoyer ${selectedList.length} SMS`}
+                </Btn>
+              </div>
+            </div>
+          )}
+
+          {/* ÉTAPE RÉSULTATS */}
+          {step === "done" && results && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 18, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: C.text, marginBottom: 14 }}>✅ Résultats de l'envoi</div>
+
+              {/* KPIs résultats */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div style={{ background: C.success + "12", border: `2px solid ${C.success}44`, borderRadius: 10, padding: 14, textAlign: "center" }}>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: C.success }}>{results.filter(r => r.ok).length}</div>
+                  <div style={{ fontSize: 12, color: C.success, fontWeight: 700 }}>SMS envoyés ✓</div>
+                </div>
+                <div style={{ background: results.filter(r => !r.ok).length > 0 ? C.danger + "12" : C.surfaceLight, border: `2px solid ${results.filter(r => !r.ok).length > 0 ? C.danger + "44" : C.border}`, borderRadius: 10, padding: 14, textAlign: "center" }}>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: results.filter(r => !r.ok).length > 0 ? C.danger : C.textDim }}>{results.filter(r => !r.ok).length}</div>
+                  <div style={{ fontSize: 12, color: results.filter(r => !r.ok).length > 0 ? C.danger : C.textDim, fontWeight: 700 }}>Échecs</div>
+                </div>
+              </div>
+
+              {/* Détail par destinataire */}
+              <div style={{ maxHeight: 320, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                {results.map((r, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 14px", borderRadius: 8, background: r.ok ? C.success + "10" : C.danger + "10", border: `1px solid ${r.ok ? C.success + "33" : C.danger + "33"}` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 16 }}>{r.ok ? "✅" : "❌"}</span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{r.el.prenom} {r.el.nom}</div>
+                        <div style={{ fontSize: 11, color: C.textMuted }}>{formatPhone(r.el.tel_parent1)}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: r.ok ? C.success : C.danger, fontWeight: 600, textAlign: "right", maxWidth: 180 }}>{r.info}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+                <Btn onClick={() => { setStep("compose"); setResults(null); setSelected(new Set()); setMessage(""); }} color={C.pink}>
+                  📱 Nouveau SMS
+                </Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ═══ MAIN ═══
-const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"},{key:"disponibilites",icon:"🟢",label:"Disponibilités"}];
+const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"},{key:"disponibilites",icon:"🟢",label:"Disponibilités"},{key:"sms",icon:"📱",label:"SMS Groupés"}];
 
 export default function App() {
   const [page, setPage] = useState("dashboard"); const [pageParams, setPageParams] = useState({});
@@ -1741,6 +2061,7 @@ export default function App() {
       case "creneaux": return <CreneauxPage creneaux={creneaux} affectations={affectations} eleves={eleves} refresh={loadData} />;
       case "paiements": return <PaiementsPage eleves={eleves} paiements={paiements} refresh={loadData} />;
       case "disponibilites": return <DisponibilitesPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} refresh={loadData} />;
+      case "sms": return <SMSPage eleves={eleves} suiviMensuel={suiviMensuel} paiements={paiements} />;
       default: return null;
     }
   };
