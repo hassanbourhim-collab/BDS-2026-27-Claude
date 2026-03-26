@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, createContext, useContext } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 
 // ═══════════════════════════════════════════════════════════════
@@ -94,7 +94,21 @@ const getSmartDay = () => {
 };
 
 const getMoisActuel = () => ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"][new Date().getMonth()];
-const tarifMode = (mode) => ({ individuel: 35, Triple: 20, double: 25 }[mode] || 15);
+
+// ═══ PARAMÈTRES GLOBAUX ═══
+const DEFAULT_SETTINGS = {
+  nomStructure: "Bulles de Savoir",
+  nomExpediteurSMS: "BdS Hassan",
+  tarifGroupe: 15, tarifReduit: 20, tarifIndividuel: 35, tarifStage: 15, cotisation: 30,
+  adresse: "", telephone: "", email: "", siret: "",
+  anneeScolaire: "2025-2026", capaciteGroupeMax: 6,
+};
+const loadSettings = () => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("bds_settings") || "{}") }; } catch { return { ...DEFAULT_SETTINGS }; } };
+let _s = loadSettings();
+const SettingsCtx = createContext(null);
+const useSettings = () => useContext(SettingsCtx);
+
+const tarifMode = (mode) => ({ individuel: _s.tarifIndividuel, Triple: _s.tarifReduit, double: _s.tarifReduit, groupe: _s.tarifGroupe, stage: _s.tarifStage }[mode] ?? 15);
 const slotDur = (cr) => { if (!cr.heure_debut || !cr.heure_fin) return 2; const [h1,m1] = cr.heure_debut.split(":").map(Number); const [h2,m2] = cr.heure_fin.split(":").map(Number); return (h2 + (m2||0)/60) - (h1 + (m1||0)/60) || 2; };
 const getWeekDates = (dateStr) => { const d = new Date(dateStr); const dow = d.getDay(); const diffToMon = dow === 0 ? -6 : 1 - dow; const mon = new Date(d); mon.setDate(d.getDate() + diffToMon); return Array.from({length: 6}, (_, i) => { const day = new Date(mon); day.setDate(mon.getDate() + i); return day.toISOString().split("T")[0]; }); };
 const todayStr = () => new Date().toISOString().split("T")[0];
@@ -1723,7 +1737,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
 
 // ═══ SMS GROUPÉS ═══
 const BREVO_KEY = import.meta.env.VITE_BREVO_KEY || "";
-const BREVO_SENDER = "BdS Hassan";
+let BREVO_SENDER = _s.nomExpediteurSMS || "BdS Hassan";
 const SMS_VARS = [
   ["{prenom_eleve}", "Prénom de l'élève"],
   ["{nom_famille}", "Nom de famille / parent"],
@@ -2094,7 +2108,7 @@ const FinancePage = ({ eleves, suiviMensuel, paiements }) => {
       .ft{margin-top:40px;padding-top:16px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
       @media print{body{padding:20px}}
     </style></head><body>
-      <div class="hdr"><div><div class="logo">🎓 Bulles de Savoir</div><div class="logo-sub">Centre de soutien scolaire</div></div>
+      <div class="hdr"><div><div class="logo">🎓 ${_s.nomStructure}</div><div class="logo-sub">${[_s.adresse, _s.telephone, _s.email].filter(Boolean).join(" · ") || "Centre de soutien scolaire"}${_s.siret ? `<br>SIRET : ${_s.siret}` : ""}</div></div>
       <div class="info"><strong>Récapitulatif ${mois}</strong><br>Édité le ${new Date().toLocaleDateString("fr-FR")}<br><br><strong>Famille : ${fam.label}</strong></div></div>
       <div class="sec">Séances de ${mois}</div>
       <table><thead><tr><th>Élève</th><th>Forfait</th><th class="r">Montant</th></tr></thead><tbody>
@@ -2109,7 +2123,7 @@ const FinancePage = ({ eleves, suiviMensuel, paiements }) => {
         <span style="font-weight:700;font-size:15px">${fam.solde >= 0 ? "✓ Compte à jour" : "⚠ Solde dû"}</span>
         <span style="font-weight:800;font-size:18px">${fam.solde >= 0 ? "+" : ""}${fam.solde.toFixed(2)} €</span>
       </div>
-      <div class="ft">Bulles de Savoir · Document généré automatiquement · ${new Date().toLocaleDateString("fr-FR")}</div>
+      <div class="ft">${_s.nomStructure} · Document généré automatiquement · ${new Date().toLocaleDateString("fr-FR")}</div>
     </body></html>`);
     w.document.close(); w.focus(); setTimeout(() => w.print(), 500);
   };
@@ -2286,13 +2300,90 @@ const FinancePage = ({ eleves, suiviMensuel, paiements }) => {
   );
 };
 
+// ═══ PAGE PARAMÈTRES ═══
+const ParametresPage = () => {
+  const { settings, saveSettings } = useSettings();
+  const [form, setForm] = useState({ ...settings });
+  const [saved, setSaved] = useState(false);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = () => {
+    saveSettings({ ...form });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  const Section = ({ title, children }) => (
+    <div style={{ background: C.surface, borderRadius: 16, border: `1px solid ${C.border}`, padding: 24, marginBottom: 20 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.accent, textTransform: "uppercase", letterSpacing: 1, marginBottom: 18 }}>{title}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>{children}</div>
+    </div>
+  );
+
+  const Field = ({ label, k, type = "text", max, hint }) => (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 6 }}>{label}{hint && <span style={{ fontWeight: 400, color: C.textDim }}> ({hint})</span>}</div>
+      <input type={type} value={form[k] ?? ""} maxLength={max}
+        onChange={e => set(k, type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)}
+        style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 800, margin: "0 auto" }}>
+      <Section title="🏫 Structure">
+        <Field label="Nom de la structure" k="nomStructure" />
+        <Field label="Année scolaire" k="anneeScolaire" hint="ex: 2025-2026" />
+        <Field label="Adresse" k="adresse" />
+        <Field label="Téléphone" k="telephone" />
+        <Field label="Email" k="email" />
+        <Field label="SIRET" k="siret" />
+      </Section>
+
+      <Section title="💶 Tarifs (€/heure)">
+        <Field label="Groupe" k="tarifGroupe" type="number" />
+        <Field label="Réduit (Triple / Double)" k="tarifReduit" type="number" />
+        <Field label="Individuel" k="tarifIndividuel" type="number" />
+        <Field label="Stage" k="tarifStage" type="number" />
+        <Field label="Cotisation annuelle (€/famille)" k="cotisation" type="number" />
+      </Section>
+
+      <Section title="👥 Groupes">
+        <Field label="Capacité max par groupe" k="capaciteGroupeMax" type="number" hint="places" />
+      </Section>
+
+      <Section title="📱 SMS">
+        <Field label="Expéditeur SMS" k="nomExpediteurSMS" max={11} hint="11 car. max" />
+        <div style={{ display: "flex", alignItems: "flex-end", paddingBottom: 4 }}>
+          <div style={{ background: C.surfaceLight, borderRadius: 10, padding: "10px 16px", fontSize: 13 }}>
+            <span style={{ color: C.textMuted, fontSize: 11 }}>Aperçu :</span><br />
+            <strong style={{ color: C.text }}>De : {form.nomExpediteurSMS || "—"}</strong>
+            {form.nomExpediteurSMS?.length > 11 && <div style={{ color: C.danger, fontSize: 11, marginTop: 4 }}>⚠ Trop long (max 11 caractères)</div>}
+          </div>
+        </div>
+      </Section>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <button onClick={handleSave} disabled={form.nomExpediteurSMS?.length > 11}
+          style={{ padding: "12px 28px", borderRadius: 12, border: "none", background: C.accent, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
+          ✓ Enregistrer les paramètres
+        </button>
+        {saved && <span style={{ color: C.success, fontWeight: 600, fontSize: 14 }}>✅ Sauvegardé !</span>}
+      </div>
+    </div>
+  );
+};
+
 // ═══ MAIN ═══
-const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"},{key:"disponibilites",icon:"🟢",label:"Disponibilités"},{key:"sms",icon:"📱",label:"SMS Groupés"},{key:"finance",icon:"💶",label:"Finance"}];
+const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"},{key:"disponibilites",icon:"🟢",label:"Disponibilités"},{key:"sms",icon:"📱",label:"SMS Groupés"},{key:"finance",icon:"💶",label:"Finance"},{key:"parametres",icon:"⚙️",label:"Paramètres"}];
 
 export default function App() {
   const [page, setPage] = useState("dashboard"); const [pageParams, setPageParams] = useState({});
   const [eleves, setEleves] = useState([]); const [creneaux, setCreneaux] = useState([]); const [affectations, setAffectations] = useState([]); const [suiviMensuel, setSuiviMensuel] = useState([]); const [paiements, setPaiements] = useState([]); const [presences, setPresences] = useState([]);
   const [loading, setLoading] = useState(true); const [error, setError] = useState(null); const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [settings, setSettings] = useState(loadSettings);
+  const saveSettings = (ns) => { _s = ns; BREVO_SENDER = ns.nomExpediteurSMS || "BdS Hassan"; localStorage.setItem("bds_settings", JSON.stringify(ns)); setSettings(ns); };
   const loadData = useCallback(async () => { try { const [e,c,a,sm,p,pr] = await Promise.all([api.get("eleves"),api.get("creneaux"),api.get("affectations_creneaux"),api.get("suivi_mensuel"),api.get("paiements"),api.get("presences")]); setEleves(e||[]); setCreneaux(c||[]); setAffectations(a||[]); setSuiviMensuel(sm||[]); setPaiements(p||[]); setPresences(pr||[]); setError(null); } catch(err) { setError(err.message); } setLoading(false); }, []);
   useEffect(() => { loadData(); }, [loadData]);
   const nav = (p, params={}) => { setPage(p); setPageParams(params); };
@@ -2308,16 +2399,18 @@ export default function App() {
       case "disponibilites": return <DisponibilitesPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} refresh={loadData} />;
       case "sms": return <SMSPage eleves={eleves} suiviMensuel={suiviMensuel} paiements={paiements} />;
       case "finance": return <FinancePage eleves={eleves} suiviMensuel={suiviMensuel} paiements={paiements} />;
+      case "parametres": return <ParametresPage />;
       default: return null;
     }
   };
   return (
+    <SettingsCtx.Provider value={{ settings, saveSettings }}>
     <div style={{ display: "flex", height: "100vh", background: C.bg, fontFamily: "'Outfit','Segoe UI',system-ui,sans-serif", color: C.text, overflow: "hidden" }}>
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
       <aside style={{ width: sidebarOpen?260:70, background: `linear-gradient(180deg, ${C.pink} 0%, ${C.sidebarHover} 100%)`, display: "flex", flexDirection: "column", transition: "width 0.3s", flexShrink: 0, overflow: "hidden", boxShadow: "2px 0 10px rgba(0,0,0,0.1)" }}>
         <div style={{ padding: sidebarOpen?"20px":"20px 10px", display: "flex", alignItems: "center", gap: 12, minHeight: 70 }}>
           <div style={{ width: 42, height: 42, borderRadius: 12, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🎓</div>
-          {sidebarOpen && <div><div style={{ fontWeight: 800, fontSize: 16, color: "#fff" }}>Bulles de Savoir</div><div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: error?"#FF5722":"#4CAF50", marginRight: 6 }} />{error?"Hors ligne":"Connecté"}</div></div>}
+          {sidebarOpen && <div><div style={{ fontWeight: 800, fontSize: 16, color: "#fff" }}>{settings.nomStructure}</div><div style={{ fontSize: 11, color: "rgba(255,255,255,0.7)" }}><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: error?"#FF5722":"#4CAF50", marginRight: 6 }} />{error?"Hors ligne":"Connecté"}</div></div>}
         </div>
         <nav style={{ flex: 1, padding: "12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
           {PAGES.map(p => (<button key={p.key} onClick={() => { setPage(p.key); setPageParams({}); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: sidebarOpen?"12px 16px":"12px 0", borderRadius: 10, border: "none", cursor: "pointer", background: page===p.key?"rgba(255,255,255,0.25)":"transparent", color: "#fff", justifyContent: sidebarOpen?"flex-start":"center", width: "100%", transition: "all 0.15s" }}
@@ -2334,5 +2427,6 @@ export default function App() {
       </aside>
       <main style={{ flex: 1, overflow: "auto", padding: 28 }}><div style={{ maxWidth: 1150, margin: "0 auto" }}>{renderPage()}</div></main>
     </div>
+    </SettingsCtx.Provider>
   );
 }
