@@ -282,8 +282,8 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
     const affData = { eleve_id: addEleve, creneau_id: slot.id, type_inscription: isStage ? "stage" : addType, actif: true, jours_stage: joursStr };
     const datesOcc = !isStage && addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
     const created = await api.post("affectations_creneaux", affData);
-    const newId = Array.isArray(created) ? created[0]?.id : created?.id;
-    if (datesOcc && newId) await api.patch("affectations_creneaux", `id=eq.${newId}`, { dates_occasion: datesOcc });
+    if (!created) return;
+    if (datesOcc) await api.patch("affectations_creneaux", `eleve_id=eq.${addEleve}&creneau_id=eq.${slot.id}&actif=eq.true`, { dates_occasion: datesOcc });
     setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddDatesOccasion([]); refresh();
   };
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
@@ -810,6 +810,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const [newEleveData, setNewEleveData] = useState({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" });
   const [addHoursChecks, setAddHoursChecks] = useState([]); // per-hour checkboxes for slots ≥ 2h
   const [addDatesOccasion, setAddDatesOccasion] = useState([]); // dates sélectionnées pour occasionnel
+  const [inscriptionSuccess, setInscriptionSuccess] = useState(null); // message after successful inscription
   const [slotDetail, setSlotDetail] = useState(null);
   const [arretModal, setArretModal] = useState(null); // { st, slot }
   const [validatingSlot, setValidatingSlot] = useState(null); // slot with students
@@ -865,12 +866,15 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     else if (addHeuresDef) affData.heures_defaut = addHeuresDef;
     const datesOcc = addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
     const created = await api.post("affectations_creneaux", affData);
-    const newId = Array.isArray(created) ? created[0]?.id : created?.id;
-    if (datesOcc && newId) await api.patch("affectations_creneaux", `id=eq.${newId}`, { dates_occasion: datesOcc });
+    if (!created) return;
+    if (datesOcc) await api.patch("affectations_creneaux", `eleve_id=eq.${addEleve}&creneau_id=eq.${addingTo.id}&actif=eq.true`, { dates_occasion: datesOcc });
     await refresh();
+    const firstDate = datesOcc?.split(",")[0];
+    if (datesOcc) setInscriptionSuccess({ dates: datesOcc.split(","), firstDate });
+    if (firstDate && firstDate !== selectedDate) setSelectedDate(firstDate);
     setAddingTo(null); setAddEleve(""); setAddType("abonne"); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]);
   };
-  const resetAddModal = () => { setAddingTo(null); setAddEleve(""); setAddType("abonne"); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); };
+  const resetAddModal = () => { setAddingTo(null); setAddEleve(""); setAddType("abonne"); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); setInscriptionSuccess(null); };
   const addNewEleveAndInscribe = async () => {
     if (!newEleveData.prenom || !newEleveData.nom || !addingTo) return;
     const created = await api.post("eleves", { ...newEleveData, actif: true });
@@ -881,9 +885,12 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
     const datesOcc = addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
     const createdAff = await api.post("affectations_creneaux", affData);
-    const newAffId = Array.isArray(createdAff) ? createdAff[0]?.id : createdAff?.id;
-    if (datesOcc && newAffId) await api.patch("affectations_creneaux", `id=eq.${newAffId}`, { dates_occasion: datesOcc });
+    if (!createdAff) return;
+    if (datesOcc) await api.patch("affectations_creneaux", `eleve_id=eq.${newId}&creneau_id=eq.${addingTo.id}&actif=eq.true`, { dates_occasion: datesOcc });
     await refresh();
+    const firstDate = datesOcc?.split(",")[0];
+    if (datesOcc) setInscriptionSuccess({ dates: datesOcc.split(","), firstDate });
+    if (firstDate && firstDate !== selectedDate) setSelectedDate(firstDate);
     resetAddModal();
   };
 
@@ -916,6 +923,16 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
         {viewMode==="day" && <Badge color={isCoursDay?C.accent:C.textDim}>{dayName}</Badge>}
         {saving && <span style={{ fontSize:13, color:C.warning }}>⏳ Enregistrement...</span>}
       </div>
+
+      {/* Bandeau succès inscription occasionnelle */}
+      {inscriptionSuccess && (
+        <div style={{ background: C.success+"15", border: `2px solid ${C.success}55`, borderRadius: 12, padding: "12px 16px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 14, color: C.success, fontWeight: 700 }}>
+            ✓ Élève inscrit pour {inscriptionSuccess.dates.length} séance{inscriptionSuccess.dates.length > 1 ? "s" : ""} — affiché le {fmtDateFr(inscriptionSuccess.firstDate)} (vue déplacée à cette date)
+          </span>
+          <button onClick={() => setInscriptionSuccess(null)} style={{ background: "none", border: "none", cursor: "pointer", color: C.success, fontSize: 18, fontWeight: 700 }}>×</button>
+        </div>
+      )}
 
       {/* Vue Semaine */}
       {viewMode === "week" && (
@@ -1526,8 +1543,7 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
       const affData = { eleve_id: eleveId, creneau_id: slot.id, type_inscription: typeInscription, actif: true, jours_stage: null };
       const datesOcc = typeInscription === "occasionnel" && datesOccasion.length > 0 ? datesOccasion.join(",") : null;
       const createdAff = await api.post("affectations_creneaux", affData);
-      const newAffId = Array.isArray(createdAff) ? createdAff[0]?.id : createdAff?.id;
-      if (datesOcc && newAffId) await api.patch("affectations_creneaux", `id=eq.${newAffId}`, { dates_occasion: datesOcc });
+      if (createdAff && datesOcc) await api.patch("affectations_creneaux", `eleve_id=eq.${eleveId}&creneau_id=eq.${slot.id}&actif=eq.true`, { dates_occasion: datesOcc });
     }
     setSaving(false); onClose(); refresh();
   };
