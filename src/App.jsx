@@ -322,32 +322,30 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Inscrire un élève</div>
         {isRegularFull ? (
           <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet ({students.length}/{slot.capacite} places)</div>
-        ) : (
-        <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif && !students.find(s => s.id === e.id)).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
-
-        {isStage ? (
-          <div>
-            <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Jours de présence</div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-              {JOURS_STAGE.map((j, i) => {
-                const full = jourCounts[i] >= slot.capacite;
-                const checked = addJours[i] && !full;
-                return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 6px", borderRadius: 10, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
-                  <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange, width: 18, height: 18 }} />
-                  <span style={{ fontSize: 12, fontWeight: 700, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
-                  {full && <span style={{ fontSize: 9, color: C.danger }}>Complet</span>}
-                </label>);
-              })}
+        ) : (<>
+          <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif && !students.find(s => s.id === e.id)).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
+          {isStage ? (
+            <div>
+              <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Jours de présence</div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+                {JOURS_STAGE.map((j, i) => {
+                  const full = jourCounts[i] >= slot.capacite;
+                  const checked = addJours[i] && !full;
+                  return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 6px", borderRadius: 10, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
+                    <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange, width: 18, height: 18 }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
+                    {full && <span style={{ fontSize: 9, color: C.danger }}>Complet</span>}
+                  </label>);
+                })}
+              </div>
             </div>
+          ) : (
+            <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
+          )}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Btn onClick={addStudent} disabled={!addEleve || !canAdd} color={C.success}>+ Inscrire</Btn>
           </div>
-        ) : (
-          <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
-        )}
-
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <Btn onClick={addStudent} disabled={!addEleve || !canAdd} color={C.success}>+ Inscrire</Btn>
-        </div>
-        )}
+        </>)}
       </div>
     </Modal>
   );
