@@ -192,14 +192,28 @@ const PaymentModal = ({ open, onClose, eleves, preselectedEleve, refresh }) => {
 };
 
 // ═══ CRÉNEAU MODAL ═══
-const CreneauModal = ({ open, onClose, creneau, refresh }) => {
+const CreneauModal = ({ open, onClose, creneau, creneaux, refresh }) => {
   const [form, setForm] = useState({ jour: "Lundi", heure_debut: "16:00", heure_fin: "17:00", mode: "groupe", capacite: 6, type_creneau: "regulier", periode_vacances: null, semaine_vacances: 1 });
   const [saving, setSaving] = useState(false);
+  const [conflictMsg, setConflictMsg] = useState("");
   useEffect(() => {
     if (creneau) setForm({ jour: creneau.jour, heure_debut: creneau.heure_debut?.substring(0,5)||"16:00", heure_fin: creneau.heure_fin?.substring(0,5)||"17:00", mode: creneau.mode, capacite: creneau.capacite, type_creneau: creneau.type_creneau || "regulier", periode_vacances: creneau.periode_vacances || "toussaint", semaine_vacances: creneau.semaine_vacances || 1 });
     else setForm({ jour: "Lundi", heure_debut: "16:00", heure_fin: "17:00", mode: "groupe", capacite: 6, type_creneau: "regulier", periode_vacances: "toussaint", semaine_vacances: 1 });
+    setConflictMsg("");
   }, [creneau, open]);
+  const toMin = t => { const [h,m] = (t||"00:00").split(":").map(Number); return h*60+m; };
   const save = async () => {
+    setConflictMsg("");
+    const startMin = toMin(form.heure_debut);
+    const endMin = toMin(form.heure_fin);
+    if (endMin <= startMin) { setConflictMsg("L'heure de fin doit être après l'heure de début."); return; }
+    const others = (creneaux||[]).filter(cr => {
+      if (creneau && cr.id === creneau.id) return false;
+      if (form.type_creneau === "regulier") return (cr.type_creneau||"regulier") === "regulier" && cr.jour === form.jour;
+      return cr.type_creneau === "stage" && cr.periode_vacances === form.periode_vacances && (cr.semaine_vacances||1) === parseInt(form.semaine_vacances);
+    });
+    const conflict = others.find(cr => toMin(cr.heure_debut) < endMin && startMin < toMin(cr.heure_fin));
+    if (conflict) { setConflictMsg(`⚠️ Conflit avec le créneau ${(conflict.heure_debut||"").substring(0,5)}-${(conflict.heure_fin||"").substring(0,5)}`); return; }
     setSaving(true);
     const data = { ...form, capacite: parseInt(form.capacite), periode_vacances: form.type_creneau === "stage" ? form.periode_vacances : null, semaine_vacances: form.type_creneau === "stage" ? parseInt(form.semaine_vacances) : null, jour: form.type_creneau === "stage" ? "Lundi" : form.jour };
     if (creneau) await api.patch("creneaux", `id=eq.${creneau.id}`, data);
@@ -237,6 +251,7 @@ const CreneauModal = ({ open, onClose, creneau, refresh }) => {
         <Input label="Capacité" value={form.capacite} onChange={v => setForm({...form, capacite: v})} type="number" />
       </div>
       {isStage && <div style={{ background: C.orange+"15", borderRadius: 10, padding: 12, marginTop: 6, fontSize: 12, color: C.orange, border: `1px solid ${C.orange}33` }}>🏖️ Ce créneau apparaîtra <b>du lundi au vendredi</b> (semaine {form.semaine_vacances}) des vacances {ALL_VACANCES.find(v=>v.id===form.periode_vacances)?.label||""}.</div>}
+      {conflictMsg && <div style={{ background: C.danger+"15", border: `2px solid ${C.danger}44`, borderRadius: 10, padding: "10px 14px", marginTop: 12, fontSize: 13, color: C.danger, fontWeight: 700 }}>{conflictMsg}</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
         <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
         <Btn onClick={save} disabled={saving} color={isStage?C.orange:C.accent}>{saving?"...":creneau?"Modifier":"Créer"}</Btn>
@@ -263,7 +278,8 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
     setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); refresh();
   };
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
-  const canAdd = isStage ? addJours.some(Boolean) : true;
+  const isRegularFull = !isStage && students.length >= slot.capacite;
+  const canAdd = !isRegularFull && (isStage ? addJours.some(Boolean) : true);
 
   return (
     <Modal open={open} onClose={onClose} title={`${isStage?"Lun→Ven":slot.jour} ${(slot.heure_debut||"").substring(0,5)}-${(slot.heure_fin||"").substring(0,5)}`} wide>
@@ -304,6 +320,9 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
 
       <div style={{ borderTop: `2px solid ${C.border}`, paddingTop: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Inscrire un élève</div>
+        {isRegularFull ? (
+          <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet ({students.length}/{slot.capacite} places)</div>
+        ) : (
         <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif && !students.find(s => s.id === e.id)).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
 
         {isStage ? (
@@ -328,6 +347,7 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <Btn onClick={addStudent} disabled={!addEleve || !canAdd} color={C.success}>+ Inscrire</Btn>
         </div>
+        )}
       </div>
     </Modal>
   );
@@ -987,12 +1007,15 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
       <Modal open={!!addingTo} onClose={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); setAddHoursChecks([]); }} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
         {addingTo && (() => {
           const isStageSlot = addingTo.type_creneau === "stage";
+          const totalInscrits = affectations.filter(a => a.creneau_id === addingTo.id && a.actif).length;
+          const isRegularFull = !isStageSlot && totalInscrits >= addingTo.capacite;
           const canAddStage = isStageSlot ? addJours.some((v, i) => v && addingJourCounts[i] < addingTo.capacite) : true;
           const dur = slotDur(addingTo);
           const nbHours = Math.floor(dur);
           const startH = parseInt((addingTo.heure_debut||"00:00").split(":")[0]);
-          const canSubmit = showNewEleve ? (newEleveData.prenom && newEleveData.nom) : (addEleve && canAddStage);
+          const canSubmit = !isRegularFull && (showNewEleve ? (newEleveData.prenom && newEleveData.nom) : (addEleve && canAddStage));
           return (<div>
+            {isRegularFull && <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", marginBottom:14, textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet ({totalInscrits}/{addingTo.capacite} places)</div>}
             {/* Tabs élève existant / nouvel élève */}
             <div style={{ display:"flex", gap:4, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}`, marginBottom:16 }}>
               <button onClick={() => setShowNewEleve(false)} style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"none", cursor:"pointer", background:!showNewEleve?C.accent:"transparent", color:!showNewEleve?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>👤 Élève existant</button>
@@ -1328,7 +1351,7 @@ const CreneauxPage = ({ creneaux, affectations, eleves, refresh }) => {
           </div>);
         })
       )}
-      <CreneauModal open={newOpen||!!editCr} onClose={() => { setNewOpen(false); setEditCr(null); }} creneau={editCr} refresh={refresh} />
+      <CreneauModal open={newOpen||!!editCr} onClose={() => { setNewOpen(false); setEditCr(null); }} creneau={editCr} creneaux={creneaux} refresh={refresh} />
       <SlotDetailModal open={!!slotDetail} onClose={() => setSlotDetail(null)} slot={slotDetail} eleves={eleves} affectations={affectations} refresh={refresh} />
     </div>
   );
