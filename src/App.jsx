@@ -2301,6 +2301,281 @@ const FinancePage = ({ eleves, suiviMensuel, paiements }) => {
   );
 };
 
+// ═══ MODULE 7 : CONGÉS & FERMETURES ═══
+const loadFermetures = () => { try { return JSON.parse(localStorage.getItem("bds_fermetures") || "[]"); } catch { return []; } };
+const saveFermeturesLS = (list) => localStorage.setItem("bds_fermetures", JSON.stringify(list));
+const mkId = () => Math.random().toString(36).slice(2, 10);
+
+const getFamillesConcernees = (ferm, creneaux, affectations, eleves) => {
+  if (!ferm.date_debut || !ferm.date_fin) return [];
+  const dates = [];
+  const d = new Date(ferm.date_debut + "T12:00:00");
+  const end = new Date(ferm.date_fin + "T12:00:00");
+  while (d <= end) { dates.push(d.toISOString().split("T")[0]); d.setDate(d.getDate() + 1); }
+  const crenIds = new Set();
+  dates.forEach(ds => {
+    const dayName = JOURS_SEMAINE[new Date(ds + "T12:00:00").getDay()];
+    creneaux.filter(cr => cr.jour === dayName && (cr.type_creneau || "regulier") === "regulier").forEach(cr => crenIds.add(cr.id));
+  });
+  const fams = {};
+  affectations.filter(a => a.actif && crenIds.has(a.creneau_id)).forEach(aff => {
+    const el = eleves.find(e => e.id === aff.eleve_id && e.actif);
+    if (!el) return;
+    const fkey = el.nom_parent1?.trim() || `${el.prenom} ${el.nom}`;
+    if (!fams[fkey]) fams[fkey] = { key: fkey, label: fkey, tel: el.tel_parent1 || el.tel_parent2 || "", elevMap: new Map() };
+    fams[fkey].elevMap.set(el.id, el);
+  });
+  return Object.values(fams).map(f => ({ ...f, eleves: [...f.elevMap.values()] }));
+};
+
+const fmtRangeFR = (ferm) => {
+  const opts = { day: "2-digit", month: "long" };
+  const d1 = new Date(ferm.date_debut + "T12:00:00").toLocaleDateString("fr-FR", opts);
+  if (ferm.date_debut === ferm.date_fin) return new Date(ferm.date_debut + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", ...opts });
+  const d2 = new Date(ferm.date_fin + "T12:00:00").toLocaleDateString("fr-FR", opts);
+  return `du ${d1} au ${d2}`;
+};
+
+const AddFermetureModal = ({ onClose, onSave, creneaux, affectations, eleves }) => {
+  const [form, setForm] = useState({ titre: "", date_debut: todayStr(), date_fin: todayStr(), note: "" });
+  const setF = (k) => (v) => setForm(f => ({ ...f, [k]: v }));
+  const preview = useMemo(() => getFamillesConcernees(form, creneaux, affectations, eleves), [form.date_debut, form.date_fin, creneaux, affectations, eleves]);
+  const nbEl = preview.reduce((s, f) => s + f.eleves.length, 0);
+  return (
+    <Modal open={true} onClose={onClose} title="📆 Nouvelle fermeture">
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 6 }}>Titre *</div>
+          <input value={form.titre} onChange={e => setF("titre")(e.target.value)} placeholder="Ex : Pont de l'Ascension, Fermeture exceptionnelle..."
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 6 }}>Date début</div>
+            <input type="date" value={form.date_debut} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, date_debut: v, date_fin: f.date_fin < v ? v : f.date_fin })); }}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text, fontSize: 14, boxSizing: "border-box" }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 6 }}>Date fin</div>
+            <input type="date" value={form.date_fin} min={form.date_debut} onChange={e => setF("date_fin")(e.target.value)}
+              style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text, fontSize: 14, boxSizing: "border-box" }} />
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 6 }}>Note interne (optionnel)</div>
+          <textarea value={form.note} onChange={e => setF("note")(e.target.value)} rows={2} placeholder="Motif, commentaire..."
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text, fontSize: 14, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+        </div>
+        <div style={{ background: preview.length > 0 ? C.warning + "12" : C.surfaceLight, borderRadius: 10, padding: "12px 16px", border: `1px solid ${preview.length > 0 ? C.warning + "44" : C.border}` }}>
+          {preview.length > 0 ? (
+            <>
+              <div style={{ fontWeight: 700, fontSize: 13, color: C.warning, marginBottom: 8 }}>⚠️ {preview.length} famille{preview.length > 1 ? "s" : ""} concernée{preview.length > 1 ? "s" : ""} · {nbEl} élève{nbEl > 1 ? "s" : ""}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{preview.map(f => <Badge key={f.key} color={C.warning}>{f.label} ({f.eleves.length})</Badge>)}</div>
+            </>
+          ) : (
+            <div style={{ color: C.textMuted, fontSize: 13 }}>Aucun cours régulier sur cette période.</div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <Btn onClick={onClose}>Annuler</Btn>
+          <Btn onClick={() => onSave(form)} color={C.warning} disabled={!form.titre.trim()}>✓ Enregistrer</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const FermetureSMSModal = ({ fermeture, onClose, onSent, creneaux, affectations, eleves }) => {
+  const families = useMemo(() => getFamillesConcernees(fermeture, creneaux, affectations, eleves), [fermeture]);
+  const defMsg = `Bonjour {nom_famille}, les cours sont annulés ${fmtRangeFR(fermeture)} (${fermeture.titre}). Merci de votre compréhension. ${BREVO_SENDER}`;
+  const [msg, setMsg] = useState(defMsg);
+  const [selected, setSelected] = useState(() => new Set(families.map(f => f.key)));
+  const [smsState, setSmsState] = useState({});
+  const [sending, setSending] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const toggle = (k) => setSelected(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const personalize = (fam) => msg
+    .replace(/{nom_famille}/g, fam.label)
+    .replace(/{titre}/g, fermeture.titre)
+    .replace(/{date_debut}/g, new Date(fermeture.date_debut + "T12:00:00").toLocaleDateString("fr-FR"))
+    .replace(/{date_fin}/g, new Date(fermeture.date_fin + "T12:00:00").toLocaleDateString("fr-FR"))
+    .replace(/{date}/g, new Date().toLocaleDateString("fr-FR"));
+
+  const sendAll = async () => {
+    setSending(true);
+    for (const fam of families.filter(f => selected.has(f.key))) {
+      const phone = formatPhone(fam.tel);
+      if (!phone) { setSmsState(s => ({ ...s, [fam.key]: "no_tel" })); continue; }
+      setSmsState(s => ({ ...s, [fam.key]: "sending" }));
+      try {
+        const r = await fetch("https://api.brevo.com/v3/transactionalSMS/sms", { method: "POST", headers: { "api-key": BREVO_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ sender: BREVO_SENDER, recipient: phone, content: personalize(fam), type: "transactional" }) });
+        setSmsState(s => ({ ...s, [fam.key]: r.ok ? "ok" : "err" }));
+      } catch { setSmsState(s => ({ ...s, [fam.key]: "err" })); }
+    }
+    setSending(false); setDone(true);
+  };
+
+  const okCount = Object.values(smsState).filter(v => v === "ok").length;
+
+  if (done) return (
+    <Modal open={true} onClose={onSent} title="📱 Résultats">
+      <div style={{ textAlign: "center", padding: "10px 0 20px" }}>
+        <div style={{ fontSize: 44, marginBottom: 10 }}>✅</div>
+        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 16 }}>{okCount} SMS envoyé{okCount > 1 ? "s" : ""} sur {families.filter(f => selected.has(f.key)).length}</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto", marginBottom: 20 }}>
+        {families.filter(f => selected.has(f.key)).map(fam => {
+          const st = smsState[fam.key];
+          return <div key={fam.key} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px", borderRadius: 7, background: C.surfaceLight, fontSize: 13 }}>
+            <span style={{ fontWeight: 600 }}>{fam.label}</span>
+            <Badge color={st === "ok" ? C.success : st === "no_tel" ? C.textMuted : C.danger}>{st === "ok" ? "✅ Envoyé" : st === "no_tel" ? "📵 Pas de tél" : "❌ Échec"}</Badge>
+          </div>;
+        })}
+      </div>
+      <div style={{ display: "flex", justifyContent: "center" }}><Btn onClick={onSent} color={C.success}>Fermer & marquer notifié</Btn></div>
+    </Modal>
+  );
+
+  return (
+    <Modal open={true} onClose={onClose} title="📱 Notifier les familles" wide>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ background: C.warning + "12", borderRadius: 10, padding: "10px 16px", border: `1px solid ${C.warning}40` }}>
+          <div style={{ fontWeight: 700, color: C.warning }}>{fermeture.titre}</div>
+          <div style={{ fontSize: 13, color: C.textMuted, marginTop: 2 }}>{fmtRangeFR(fermeture)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 6 }}>Message</div>
+          <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={4}
+            style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text, fontSize: 13, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>
+            Variables : {["{nom_famille}","{titre}","{date_debut}","{date_fin}"].map(v => <code key={v} style={{ background: C.surfaceLight, padding: "1px 5px", borderRadius: 3, marginRight: 4 }}>{v}</code>)}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 8 }}>
+            Destinataires ({selected.size}/{families.length})
+            <button onClick={() => setSelected(new Set(families.map(f => f.key)))} style={{ marginLeft: 8, fontSize: 11, color: C.accent, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>Tout sélectionner</button>
+          </div>
+          {families.length === 0
+            ? <div style={{ color: C.textMuted, fontSize: 13, fontStyle: "italic" }}>Aucune famille concernée sur ces dates.</div>
+            : <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                {families.map(fam => (
+                  <label key={fam.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: selected.has(fam.key) ? C.accent + "08" : C.surfaceLight, border: `1px solid ${selected.has(fam.key) ? C.accent + "30" : C.border}`, cursor: "pointer" }}>
+                    <input type="checkbox" checked={selected.has(fam.key)} onChange={() => toggle(fam.key)} />
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{fam.label}</span>
+                      <span style={{ fontSize: 12, color: C.textMuted, marginLeft: 8 }}>{fam.eleves.map(e => e.prenom).join(", ")}</span>
+                    </div>
+                    {!fam.tel
+                      ? <span style={{ fontSize: 11, color: C.danger }}>Pas de tél</span>
+                      : !formatPhone(fam.tel) && <span style={{ fontSize: 11, color: C.danger }}>Tél invalide</span>}
+                  </label>
+                ))}
+              </div>}
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <Btn onClick={onClose}>Annuler</Btn>
+          <Btn onClick={sendAll} color={C.warning} disabled={sending || selected.size === 0}>
+            {sending ? "⏳ Envoi en cours..." : `📱 Envoyer à ${selected.size} famille${selected.size > 1 ? "s" : ""}`}
+          </Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+const FermetureCard = ({ f, creneaux, affectations, eleves, today, onSms, onDelete }) => {
+  const families = getFamillesConcernees(f, creneaux, affectations, eleves);
+  const nbEl = families.reduce((s, fm) => s + fm.eleves.length, 0);
+  const isPast = f.date_fin < today;
+  return (
+    <div style={{ background: C.surface, borderRadius: 14, border: `1px solid ${C.border}`, padding: "16px 20px", display: "flex", alignItems: "center", gap: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.04)", opacity: isPast ? 0.6 : 1 }}>
+      <div style={{ width: 48, height: 48, borderRadius: 12, background: isPast ? C.surfaceLight : C.warning + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+        {isPast ? "📁" : "🔒"}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 700, fontSize: 15 }}>{f.titre}</div>
+        <div style={{ fontSize: 13, color: C.textMuted, marginTop: 2 }}>{fmtRangeFR(f)}</div>
+        {f.note && <div style={{ fontSize: 12, color: C.textDim, marginTop: 2 }}>📝 {f.note}</div>}
+        <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <Badge color={families.length > 0 ? C.blue : C.textMuted}>{families.length} famille{families.length !== 1 ? "s" : ""}</Badge>
+          <Badge color={nbEl > 0 ? C.purple : C.textMuted}>{nbEl} élève{nbEl !== 1 ? "s" : ""}</Badge>
+          {f.smsEnvoye && <Badge color={C.success}>✅ Notifié</Badge>}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        {!isPast && (
+          <button onClick={onSms} disabled={families.length === 0}
+            style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: families.length > 0 ? C.warning + "20" : C.surfaceLight, color: families.length > 0 ? C.warning : C.textDim, fontWeight: 700, cursor: families.length > 0 ? "pointer" : "not-allowed", fontSize: 13 }}>
+            📱 Notifier
+          </button>
+        )}
+        <button onClick={onDelete}
+          style={{ padding: "8px 12px", borderRadius: 8, border: "none", background: C.danger + "10", color: C.danger, fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+          🗑
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const CongesPage = ({ creneaux, affectations, eleves }) => {
+  const [fermetures, setFermetures] = useState(loadFermetures);
+  const [showAdd, setShowAdd] = useState(false);
+  const [smsTarget, setSmsTarget] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+
+  const updateList = (list) => { setFermetures(list); saveFermeturesLS(list); };
+  const addFermeture = (f) => updateList([...fermetures, { ...f, id: mkId(), created_at: new Date().toISOString(), smsEnvoye: false }].sort((a, b) => a.date_debut.localeCompare(b.date_debut)));
+  const markSent = (id) => updateList(fermetures.map(f => f.id === id ? { ...f, smsEnvoye: true } : f));
+  const removeFermeture = (id) => { updateList(fermetures.filter(f => f.id !== id)); setDeletingId(null); };
+
+  const today = todayStr();
+  const upcoming = fermetures.filter(f => f.date_fin >= today);
+  const past = fermetures.filter(f => f.date_fin < today).slice().reverse();
+
+  return (
+    <div style={{ maxWidth: 900, margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 20 }}>Congés & Fermetures</div>
+          <div style={{ fontSize: 13, color: C.textMuted, marginTop: 2 }}>{upcoming.length} fermeture{upcoming.length !== 1 ? "s" : ""} à venir</div>
+        </div>
+        <Btn onClick={() => setShowAdd(true)} color={C.warning}>+ Ajouter une fermeture</Btn>
+      </div>
+
+      {upcoming.length === 0
+        ? <div style={{ textAlign: "center", padding: 48, color: C.textMuted, fontSize: 14, background: C.surface, borderRadius: 16, border: `1px solid ${C.border}`, marginBottom: 20 }}>📅 Aucune fermeture prévue — tout est ouvert !</div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 28 }}>
+            {upcoming.map(f => <FermetureCard key={f.id} f={f} creneaux={creneaux} affectations={affectations} eleves={eleves} today={today} onSms={() => setSmsTarget(f)} onDelete={() => setDeletingId(f.id)} />)}
+          </div>}
+
+      {past.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Historique</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {past.map(f => <FermetureCard key={f.id} f={f} creneaux={creneaux} affectations={affectations} eleves={eleves} today={today} onSms={() => setSmsTarget(f)} onDelete={() => setDeletingId(f.id)} />)}
+          </div>
+        </>
+      )}
+
+      {deletingId && (
+        <Modal open={true} onClose={() => setDeletingId(null)} title="Confirmer la suppression">
+          <p style={{ marginBottom: 20, color: C.textMuted, fontSize: 14 }}>Supprimer cette fermeture ? Cette action est irréversible.</p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <Btn onClick={() => removeFermeture(deletingId)} color={C.danger}>Supprimer</Btn>
+            <Btn onClick={() => setDeletingId(null)}>Annuler</Btn>
+          </div>
+        </Modal>
+      )}
+
+      {showAdd && <AddFermetureModal onClose={() => setShowAdd(false)} onSave={(f) => { addFermeture(f); setShowAdd(false); }} creneaux={creneaux} affectations={affectations} eleves={eleves} />}
+      {smsTarget && <FermetureSMSModal fermeture={smsTarget} onClose={() => setSmsTarget(null)} onSent={() => { markSent(smsTarget.id); setSmsTarget(null); }} creneaux={creneaux} affectations={affectations} eleves={eleves} />}
+    </div>
+  );
+};
+
 // ═══ PAGE PARAMÈTRES ═══
 // ParamSection et ParamField définis au niveau module (jamais à l'intérieur d'un composant)
 // pour éviter le re-mount à chaque frappe qui fait sauter le curseur.
@@ -2384,7 +2659,7 @@ const ParametresPage = () => {
 };
 
 // ═══ MAIN ═══
-const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"},{key:"disponibilites",icon:"🟢",label:"Disponibilités"},{key:"sms",icon:"📱",label:"SMS Groupés"},{key:"finance",icon:"💶",label:"Finance"},{key:"parametres",icon:"⚙️",label:"Paramètres"}];
+const PAGES = [{key:"dashboard",icon:"🏠",label:"Tableau de bord"},{key:"planning",icon:"📋",label:"Planning / Appel"},{key:"eleves",icon:"👥",label:"Élèves"},{key:"creneaux",icon:"📅",label:"Créneaux"},{key:"paiements",icon:"💳",label:"Paiements"},{key:"disponibilites",icon:"🟢",label:"Disponibilités"},{key:"sms",icon:"📱",label:"SMS Groupés"},{key:"finance",icon:"💶",label:"Finance"},{key:"conges",icon:"📆",label:"Congés / Fermetures"},{key:"parametres",icon:"⚙️",label:"Paramètres"}];
 
 export default function App() {
   const [page, setPage] = useState("dashboard"); const [pageParams, setPageParams] = useState({});
@@ -2407,6 +2682,7 @@ export default function App() {
       case "disponibilites": return <DisponibilitesPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} refresh={loadData} />;
       case "sms": return <SMSPage eleves={eleves} suiviMensuel={suiviMensuel} paiements={paiements} />;
       case "finance": return <FinancePage eleves={eleves} suiviMensuel={suiviMensuel} paiements={paiements} />;
+      case "conges": return <CongesPage creneaux={creneaux} affectations={affectations} eleves={eleves} />;
       case "parametres": return <ParametresPage />;
       default: return null;
     }
