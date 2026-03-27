@@ -124,6 +124,9 @@ const tarifMode = (mode) => ({ individuel: _s.tarifIndividuel, Triple: _s.tarifR
 const slotDur = (cr) => { if (!cr.heure_debut || !cr.heure_fin) return 2; const [h1,m1] = cr.heure_debut.split(":").map(Number); const [h2,m2] = cr.heure_fin.split(":").map(Number); return (h2 + (m2||0)/60) - (h1 + (m1||0)/60) || 2; };
 const getWeekDates = (dateStr) => { const d = new Date(dateStr); const dow = d.getDay(); const diffToMon = dow === 0 ? -6 : 1 - dow; const mon = new Date(d); mon.setDate(d.getDate() + diffToMon); return Array.from({length: 6}, (_, i) => { const day = new Date(mon); day.setDate(mon.getDate() + i); return day.toISOString().split("T")[0]; }); };
 const todayStr = () => new Date().toISOString().split("T")[0];
+const getWeekNumber = (dateStr) => { const d = new Date(dateStr); d.setHours(0,0,0,0); d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7); const w1 = new Date(d.getFullYear(), 0, 4); return 1 + Math.round(((d - w1) / 86400000 - 3 + (w1.getDay() + 6) % 7) / 7); };
+const getNextOccurrences = (jour, fromDate, count = 10) => { const dayIdx = JOURS_SEMAINE.indexOf(jour); if (dayIdx < 0) return []; const dates = []; const d = new Date(fromDate); for (let i = 0; dates.length < count && i < 365; i++) { d.setDate(d.getDate() + 1); if (d.getDay() === dayIdx) dates.push(d.toISOString().split("T")[0]); } return dates; };
+const fmtDateFr = (dateStr) => { const d = new Date(dateStr); return `${d.getDate().toString().padStart(2,"0")}/${(d.getMonth()+1).toString().padStart(2,"0")}`; };
 
 // ═══ UI COMPONENTS ═══
 const Badge = ({ children, color = C.accent, onClick, title }) => (
@@ -503,7 +506,10 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick }) =
       const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif);
       const n = ctx.type === "vacances"
         ? aff.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
-        : aff.length;
+        : aff.filter(a => {
+            if (a.type_inscription === "occasionnel" && a.dates_occasion) return a.dates_occasion.split(",").includes(dateStr);
+            return true;
+          }).length;
       const pct = cr.capacite > 0 ? n / cr.capacite : 0;
       const fillColor = pct >= 1 ? C.danger : pct > 0 && pct < 1 ? C.warning : C.success;
       const fillLabel = pct >= 1 ? "Complet" : pct >= 0.5 ? "Partiel" : n > 0 ? "Partiel" : "Libre";
@@ -516,6 +522,7 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick }) =
 
   // Semaine label
   const d0 = new Date(weekDates[0]); const d5 = new Date(weekDates[5]);
+  const wNum = getWeekNumber(weekDates[0]);
   const wLabel = `${d0.getDate()} ${d0.toLocaleDateString("fr-FR",{month:"short"})} — ${d5.getDate()} ${d5.toLocaleDateString("fr-FR",{month:"short",year:"numeric"})}`;
 
   // Detect if this is a vacation week
@@ -524,7 +531,8 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick }) =
   return (
     <div>
       {/* Bandeau semaine */}
-      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16, flexWrap:"wrap" }}>
+        <span style={{ background:C.accent+"20", color:C.accent, fontWeight:800, fontSize:13, padding:"4px 14px", borderRadius:20, border:`1px solid ${C.accent}44` }}>S{wNum}</span>
         <span style={{ fontSize:14, fontWeight:700, color:C.textMuted }}>{wLabel}</span>
         {vacCtx && <span style={{ background:C.orange+"20", color:C.orange, fontWeight:700, fontSize:12, padding:"4px 12px", borderRadius:20, border:`1px solid ${C.orange}44` }}>🏕️ {vacCtx.vacance.label} — Semaine {vacCtx.semaine}</span>}
       </div>
@@ -761,6 +769,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const [showNewEleve, setShowNewEleve] = useState(false);
   const [newEleveData, setNewEleveData] = useState({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" });
   const [addHoursChecks, setAddHoursChecks] = useState([]); // per-hour checkboxes for slots ≥ 2h
+  const [addDatesOccasion, setAddDatesOccasion] = useState([]); // dates sélectionnées pour occasionnel
   const [slotDetail, setSlotDetail] = useState(null);
   const [arretModal, setArretModal] = useState(null); // { st, slot }
   const [validatingSlot, setValidatingSlot] = useState(null); // slot with students
@@ -795,7 +804,8 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
       const assigned = affectations.filter(a => a.creneau_id === cr.id && a.actif);
       const students = assigned.map(a => {
         if (cr.type_creneau === "stage" && a.jours_stage && !a.jours_stage.includes(dayName)) return null;
-        const el = eleves.find(e => e.id === a.eleve_id); const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id); return el ? { ...el, type_inscription: a.type_inscription, presence: pres, affectation_id: a.id, jours_stage: a.jours_stage, heures_defaut: a.heures_defaut || null } : null;
+        if (a.type_inscription === "occasionnel" && a.dates_occasion && !a.dates_occasion.split(",").includes(selectedDate)) return null;
+        const el = eleves.find(e => e.id === a.eleve_id); const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id); return el ? { ...el, type_inscription: a.type_inscription, presence: pres, affectation_id: a.id, jours_stage: a.jours_stage, heures_defaut: a.heures_defaut || null, dates_occasion: a.dates_occasion || null } : null;
       }).filter(Boolean);
       return { ...cr, students, dur: slotDur(cr) };
     });
@@ -815,10 +825,12 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     const checkedCount = addHoursChecks.filter(Boolean).length;
     if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
     else if (addHeuresDef) affData.heures_defaut = addHeuresDef;
+    if (!isStageSlot && addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
     await api.post("affectations_creneaux", affData);
     await refresh();
-    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]);
+    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]);
   };
+  const resetAddModal = () => { setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); };
   const addNewEleveAndInscribe = async () => {
     if (!newEleveData.prenom || !newEleveData.nom || !addingTo) return;
     const created = await api.post("eleves", { ...newEleveData, actif: true });
@@ -829,10 +841,10 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     const affData = { eleve_id: newId, creneau_id: addingTo.id, type_inscription: isStageSlot ? "stage" : addType, actif: true, jours_stage: joursStr };
     const checkedCount = addHoursChecks.filter(Boolean).length;
     if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
+    if (!isStageSlot && addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
     await api.post("affectations_creneaux", affData);
     await refresh();
-    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null);
-    setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); setAddHoursChecks([]);
+    resetAddModal();
   };
 
   const stats = useMemo(() => { let t=0,p=0,a=0,pe=0; daySlots.forEach(s => s.students.forEach(st => { t++; if(st.presence){st.presence.statut==="present"?p++:a++;}else pe++; })); return { t,p,a,pe }; }, [daySlots]);
@@ -945,7 +957,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap:"wrap" }}>
                             <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>
                             {st.jours_stage && st.jours_stage.split(",").length < 5 && <span style={{ fontSize: 10, color: C.orange, fontWeight: 600 }}>{st.jours_stage.split(",").length}j</span>}
-                            {st.type_inscription==="occasionnel" && <Badge color={C.warning}>Occ.</Badge>}
+                            {st.type_inscription==="occasionnel" && <Badge color={C.warning}>⚡ Occ.{st.dates_occasion ? ` (${st.dates_occasion.split(",").length}×)` : ""}</Badge>}
                             {st.heures_defaut && st.heures_defaut !== slot.dur && <Badge color={C.purple}>{st.heures_defaut}h</Badge>}
                             <span style={{ fontSize: 11, color: C.textDim }}>{st.classe}</span>
                             {/* Arrêt définitif */}
@@ -1002,7 +1014,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
       )}
       </>}
 
-      <Modal open={!!addingTo} onClose={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); setAddHoursChecks([]); }} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
+      <Modal open={!!addingTo} onClose={resetAddModal} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
         {addingTo && (() => {
           const isStageSlot = addingTo.type_creneau === "stage";
           const totalInscrits = affectations.filter(a => a.creneau_id === addingTo.id && a.actif).length;
@@ -1011,7 +1023,8 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
           const dur = slotDur(addingTo);
           const nbHours = Math.floor(dur);
           const startH = parseInt((addingTo.heure_debut||"00:00").split(":")[0]);
-          const canSubmit = !isRegularFull && (showNewEleve ? (newEleveData.prenom && newEleveData.nom) : (addEleve && canAddStage));
+          const needsDates = !isStageSlot && addType === "occasionnel";
+          const canSubmit = !isRegularFull && (showNewEleve ? (newEleveData.prenom && newEleveData.nom) : (addEleve && canAddStage && (!needsDates || addDatesOccasion.length > 0)));
           return (<div>
             {isRegularFull && <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", marginBottom:14, textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet ({totalInscrits}/{addingTo.capacite} places)</div>}
             {/* Tabs élève existant / nouvel élève */}
@@ -1062,9 +1075,43 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
                   })}
                 </div>
               </div>
-            ) : (
-              <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
-            )}
+            ) : (<>
+              <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
+              {addType === "occasionnel" && (() => {
+                const nextDates = getNextOccurrences(addingTo.jour, selectedDate, 10);
+                if (!nextDates.length) return null;
+                const abonnes = affectations.filter(a => a.creneau_id === addingTo.id && a.actif && a.type_inscription !== "occasionnel").length;
+                return (<div style={{ marginTop:12 }}>
+                  <div style={{ fontSize:12, color:C.textMuted, marginBottom:8, fontWeight:700 }}>Dates de présence <span style={{ color:C.purple }}>(cocher les séances souhaitées)</span></div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:4 }}>
+                    {nextDates.map(d => {
+                      const sel = addDatesOccasion.includes(d);
+                      const occOnDate = affectations.filter(a => a.creneau_id === addingTo.id && a.actif && a.type_inscription === "occasionnel" && a.dates_occasion && a.dates_occasion.split(",").includes(d)).length;
+                      const totalOnDate = abonnes + occOnDate + (sel ? 1 : 0);
+                      const willFull = totalOnDate >= addingTo.capacite;
+                      return (<label key={d} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"8px 10px", borderRadius:10, border:`2px solid ${sel ? C.purple : C.border}`, background: sel ? C.purple+"15" : "transparent", cursor:"pointer", minWidth:58 }}>
+                        <input type="checkbox" checked={sel} onChange={() => setAddDatesOccasion(prev => sel ? prev.filter(x => x !== d) : [...prev, d])} style={{ accentColor:C.purple, width:16, height:16 }} />
+                        <span style={{ fontSize:12, fontWeight:700, color:sel ? C.purple : C.text }}>{fmtDateFr(d)}</span>
+                        {willFull && <span style={{ fontSize:9, color:C.danger, fontWeight:700 }}>Complet</span>}
+                      </label>);
+                    })}
+                  </div>
+                  <div style={{ fontSize:11, color:C.textDim, marginTop:4 }}>{addDatesOccasion.length} date{addDatesOccasion.length>1?"s":""} sélectionnée{addDatesOccasion.length>1?"s":""}</div>
+                </div>);
+              })()}
+              {addType === "abonne" && (() => {
+                const abonnesCount = affectations.filter(a => a.creneau_id === addingTo.id && a.actif && a.type_inscription !== "occasionnel").length;
+                const datesMap = {};
+                affectations.filter(a => a.creneau_id === addingTo.id && a.actif && a.type_inscription === "occasionnel" && a.dates_occasion)
+                  .forEach(a => a.dates_occasion.split(",").forEach(d => { datesMap[d] = (datesMap[d]||0) + 1; }));
+                const conflictDates = Object.entries(datesMap).filter(([,cnt]) => abonnesCount + 1 + cnt > addingTo.capacite).map(([d]) => d).sort();
+                return conflictDates.length > 0 ? (
+                  <div style={{ background:C.warning+"15", border:`2px solid ${C.warning}44`, borderRadius:10, padding:"10px 14px", marginTop:10, fontSize:12, color:C.warning, fontWeight:700 }}>
+                    ⚠️ Ce créneau sera <b>complet</b> les {conflictDates.map(fmtDateFr).join(", ")} à cause d'élèves occasionnels
+                  </div>
+                ) : null;
+              })()}
+            </>)}
             {nbHours >= 2 ? (
               <div style={{ marginTop:12, marginBottom:6 }}>
                 <div style={{ fontSize:12, color:C.textMuted, marginBottom:8, fontWeight:700 }}>Heures suivies</div>
@@ -1085,7 +1132,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
               </div>
             ) : null}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
-              <Btn onClick={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); setAddHoursChecks([]); }} color={C.textMuted} outline>Annuler</Btn>
+              <Btn onClick={resetAddModal} color={C.textMuted} outline>Annuler</Btn>
               <Btn onClick={showNewEleve ? addNewEleveAndInscribe : addOcc} disabled={!canSubmit}>Ajouter</Btn>
             </div>
           </div>);
