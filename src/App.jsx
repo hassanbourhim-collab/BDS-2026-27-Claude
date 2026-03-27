@@ -127,6 +127,7 @@ const todayStr = () => new Date().toISOString().split("T")[0];
 const getWeekNumber = (dateStr) => { const d = new Date(dateStr); d.setHours(0,0,0,0); d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7); const w1 = new Date(d.getFullYear(), 0, 4); return 1 + Math.round(((d - w1) / 86400000 - 3 + (w1.getDay() + 6) % 7) / 7); };
 const getNextOccurrences = (jour, fromDate, count = 10) => { const dayIdx = JOURS_SEMAINE.indexOf(jour); if (dayIdx < 0) return []; const dates = []; const d = new Date(fromDate); for (let i = 0; dates.length < count && i < 365; i++) { d.setDate(d.getDate() + 1); if (d.getDay() === dayIdx) dates.push(d.toISOString().split("T")[0]); } return dates; };
 const fmtDateFr = (dateStr) => { const d = new Date(dateStr); return `${d.getDate().toString().padStart(2,"0")}/${(d.getMonth()+1).toString().padStart(2,"0")}`; };
+const getVacationWeekDates = (periodeId, semaine) => { const vac = ALL_VACANCES.find(v => v.id === periodeId); if (!vac) return []; const start = semaine === 1 ? vac.s1d : vac.s2d; const end = semaine === 1 ? vac.s1f : vac.s2f; const dates = []; const d = new Date(start + "T12:00:00"); const endD = new Date(end + "T12:00:00"); while (d <= endD) { if (d.getDay() >= 1 && d.getDay() <= 5) dates.push(d.toISOString().split("T")[0]); d.setDate(d.getDate() + 1); } return dates; };
 
 // ═══ UI COMPONENTS ═══
 const Badge = ({ children, color = C.accent, onClick, title }) => (
@@ -268,21 +269,25 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
   const [addEleve, setAddEleve] = useState("");
   const [addType, setAddType] = useState("abonne");
   const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
+  const [addDatesOccasion, setAddDatesOccasion] = useState([]);
   if (!open || !slot) return null;
   const isStage = slot.type_creneau === "stage";
   const allAffs = affectations.filter(a => a.creneau_id === slot.id && a.actif);
-  const students = allAffs.map(a => { const el = eleves.find(e => e.id === a.eleve_id); return el ? { ...el, affectation_id: a.id, type_inscription: a.type_inscription, jours_stage: a.jours_stage } : null; }).filter(Boolean);
+  const students = allAffs.map(a => { const el = eleves.find(e => e.id === a.eleve_id); return el ? { ...el, affectation_id: a.id, type_inscription: a.type_inscription, jours_stage: a.jours_stage, dates_occasion: a.dates_occasion } : null; }).filter(Boolean);
   const jourCounts = isStage ? JOURS_STAGE.map(j => allAffs.filter(a => !a.jours_stage || a.jours_stage.includes(j)).length) : [];
   const removeStudent = async (affId) => { await api.del("affectations_creneaux", `id=eq.${affId}`); refresh(); };
   const addStudent = async () => {
     if (!addEleve) return;
     const joursStr = isStage ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
-    await api.post("affectations_creneaux", { eleve_id: addEleve, creneau_id: slot.id, type_inscription: isStage ? "stage" : addType, actif: true, jours_stage: joursStr });
-    setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); refresh();
+    const affData = { eleve_id: addEleve, creneau_id: slot.id, type_inscription: isStage ? "stage" : addType, actif: true, jours_stage: joursStr };
+    if (!isStage && addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
+    await api.post("affectations_creneaux", affData);
+    setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddDatesOccasion([]); refresh();
   };
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
   const isRegularFull = !isStage && students.length >= slot.capacite;
-  const canAdd = !isRegularFull && (isStage ? addJours.some(Boolean) : true);
+  const needsDates = !isStage && addType === "occasionnel";
+  const canAdd = !isRegularFull && (isStage ? addJours.some(Boolean) : (!needsDates || addDatesOccasion.length > 0));
 
   return (
     <Modal open={open} onClose={onClose} title={`${isStage?"Lun→Ven":slot.jour} ${(slot.heure_debut||"").substring(0,5)}-${(slot.heure_fin||"").substring(0,5)}`} wide>
@@ -342,9 +347,25 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
                 })}
               </div>
             </div>
-          ) : (
-            <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
-          )}
+          ) : (<>
+            <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
+            {addType === "occasionnel" && (() => {
+              const nextDates = getNextOccurrences(slot.jour, todayStr(), 8);
+              return (<div style={{ marginTop: 6, marginBottom: 6 }}>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Séances concernées <span style={{ color: C.warning }}>(cocher les dates)</span></div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
+                  {nextDates.map(d => {
+                    const sel = addDatesOccasion.includes(d);
+                    return (<label key={d} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 10px", borderRadius: 10, border: `2px solid ${sel ? C.warning : C.border}`, background: sel ? C.warning+"15" : "transparent", cursor: "pointer", minWidth: 56 }}>
+                      <input type="checkbox" checked={sel} onChange={() => setAddDatesOccasion(prev => sel ? prev.filter(x => x !== d) : [...prev, d])} style={{ accentColor: C.warning, width: 16, height: 16 }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: sel ? C.warning : C.text }}>{fmtDateFr(d)}</span>
+                    </label>);
+                  })}
+                </div>
+                <div style={{ fontSize: 11, color: C.textDim }}>{addDatesOccasion.length} séance{addDatesOccasion.length > 1 ? "s" : ""} sélectionnée{addDatesOccasion.length > 1 ? "s" : ""}</div>
+              </div>);
+            })()}
+          </>)}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <Btn onClick={addStudent} disabled={!addEleve || !canAdd} color={C.success}>+ Inscrire</Btn>
           </div>
@@ -486,7 +507,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
 };
 
 // ═══ VUE SEMAINE (style Pronote) ═══
-const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick }) => {
+const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick, onWeekChange }) => {
   const weekDates = useMemo(() => getWeekDates(baseDate), [baseDate]);
   const today = todayStr();
 
@@ -504,49 +525,60 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick }) =
     }
     const slotsWithData = slots.sort((a,b) => (a.heure_debut||"").localeCompare(b.heure_debut||"")).map(cr => {
       const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif);
-      const n = ctx.type === "vacances"
-        ? aff.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
+      // Count students expected on this specific date (handles abonné, occasionnel, old jours_stage)
+      const inscribed = ctx.type === "vacances"
+        ? aff.filter(a => {
+            if (a.jours_stage) return a.jours_stage.includes(dayName); // rétro-compat ancien système
+            if (a.type_inscription === "occasionnel" && a.dates_occasion) return a.dates_occasion.split(",").includes(dateStr);
+            return true; // abonné ou stage sans restriction = toute la semaine
+          }).length
         : aff.filter(a => {
             if (a.type_inscription === "occasionnel" && a.dates_occasion) return a.dates_occasion.split(",").includes(dateStr);
-            return true;
+            return true; // abonné = toujours présent
           }).length;
-      const pct = cr.capacite > 0 ? n / cr.capacite : 0;
-      const fillColor = pct >= 1 ? C.danger : pct > 0 && pct < 1 ? C.warning : C.success;
-      const fillLabel = pct >= 1 ? "Complet" : pct >= 0.5 ? "Partiel" : n > 0 ? "Partiel" : "Libre";
       const dayPres = presences.filter(p => p.date_cours === dateStr && p.creneau_id === cr.id);
-      const appelFait = n > 0 && dayPres.length >= n;
-      return { ...cr, n, pct, fillColor, fillLabel, appelFait };
+      const absJust = dayPres.filter(p => p.statut === "absent_justifie").length;
+      // n = présents attendus = inscrits - absences prévenus
+      const n = Math.max(0, inscribed - absJust);
+      const pct = cr.capacite > 0 ? inscribed / cr.capacite : 0;
+      const fillColor = pct >= 1 ? C.danger : pct >= 0.5 ? C.warning : inscribed > 0 ? C.success : C.textDim;
+      const fillLabel = pct >= 1 ? "Complet" : pct >= 0.5 ? "Partiel" : inscribed > 0 ? "Libre" : "Vide";
+      const appelFait = inscribed > 0 && dayPres.length >= inscribed;
+      const isFuture = dateStr > today;
+      return { ...cr, n, inscribed, pct, fillColor, fillLabel, appelFait, isFuture, absJust };
     });
     return { dateStr, ctx, dayName, dow, slots: slotsWithData, isToday: dateStr === today };
   }), [weekDates, creneaux, affectations, presences, today]);
 
-  // Semaine label
   const d0 = new Date(weekDates[0]); const d5 = new Date(weekDates[5]);
   const wNum = getWeekNumber(weekDates[0]);
   const wLabel = `${d0.getDate()} ${d0.toLocaleDateString("fr-FR",{month:"short"})} — ${d5.getDate()} ${d5.toLocaleDateString("fr-FR",{month:"short",year:"numeric"})}`;
-
-  // Detect if this is a vacation week
   const vacCtx = weekData.find(d => d.ctx.type === "vacances")?.ctx;
+
+  const goPrev = () => { if (!onWeekChange) return; const d = new Date(weekDates[0]); d.setDate(d.getDate()-7); onWeekChange(d.toISOString().split("T")[0]); };
+  const goNext = () => { if (!onWeekChange) return; const d = new Date(weekDates[0]); d.setDate(d.getDate()+7); onWeekChange(d.toISOString().split("T")[0]); };
 
   return (
     <div>
-      {/* Bandeau semaine */}
-      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16, flexWrap:"wrap" }}>
-        <span style={{ background:C.accent+"20", color:C.accent, fontWeight:800, fontSize:13, padding:"4px 14px", borderRadius:20, border:`1px solid ${C.accent}44` }}>S{wNum}</span>
-        <span style={{ fontSize:14, fontWeight:700, color:C.textMuted }}>{wLabel}</span>
-        {vacCtx && <span style={{ background:C.orange+"20", color:C.orange, fontWeight:700, fontSize:12, padding:"4px 12px", borderRadius:20, border:`1px solid ${C.orange}44` }}>🏕️ {vacCtx.vacance.label} — Semaine {vacCtx.semaine}</span>}
+      {/* Bandeau semaine + navigation */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, flexWrap:"wrap", gap:8 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+          {onWeekChange && <button onClick={goPrev} style={{ background:C.surfaceLight, border:`1px solid ${C.border}`, color:C.text, cursor:"pointer", width:32, height:32, borderRadius:8, fontWeight:800, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>‹</button>}
+          <span style={{ background:C.accent+"20", color:C.accent, fontWeight:800, fontSize:13, padding:"4px 14px", borderRadius:20, border:`1px solid ${C.accent}44` }}>S{wNum}</span>
+          <span style={{ fontSize:14, fontWeight:700, color:C.textMuted }}>{wLabel}</span>
+          {vacCtx && <span style={{ background:C.orange+"20", color:C.orange, fontWeight:700, fontSize:12, padding:"4px 12px", borderRadius:20, border:`1px solid ${C.orange}44` }}>🏕️ {vacCtx.vacance.label} — S{vacCtx.semaine}</span>}
+          {onWeekChange && <button onClick={goNext} style={{ background:C.surfaceLight, border:`1px solid ${C.border}`, color:C.text, cursor:"pointer", width:32, height:32, borderRadius:8, fontWeight:800, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>›</button>}
+        </div>
+        {onWeekChange && <button onClick={() => onWeekChange(today)} style={{ background:C.accent+"15", border:`1px solid ${C.accent}44`, color:C.accent, cursor:"pointer", padding:"5px 14px", borderRadius:8, fontWeight:700, fontSize:12 }}>Aujourd'hui</button>}
       </div>
 
       {/* Légende */}
       <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
-        {[[C.success,"Libre"],[C.warning,"Partiel"],[C.danger,"Complet"]].map(([col,lbl]) => (
+        {[[C.success,"Libre"],[C.warning,"Partiel"],[C.danger,"Complet"],[C.blue,"Appel fait"]].map(([col,lbl]) => (
           <div key={lbl} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.textMuted }}>
-            <div style={{ width:12, height:12, borderRadius:3, background:col }} />{lbl}
+            <div style={{ width:12, height:12, borderRadius:3, background:lbl==="Appel fait"?col+"60":col, ...(lbl==="Appel fait"?{border:`1px solid ${col}`}:{}) }} />{lbl}
           </div>
         ))}
-        <div style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.textMuted }}>
-          <div style={{ width:12, height:12, borderRadius:3, background:C.blue+"60", border:`1px solid ${C.blue}` }} />Appel fait
-        </div>
       </div>
 
       {/* Grille 6 colonnes */}
@@ -570,7 +602,7 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick }) =
 
             {/* Contenu du jour */}
             {day.ctx.type === "samedi_milieu" ? (
-              <div style={{ fontSize:10, color:C.textDim, textAlign:"center", padding:"12px 4px", background:C.surfaceLight, borderRadius:8, border:`1px dashed ${C.border}` }}>Milieu vacances</div>
+              <div style={{ fontSize:10, color:C.textDim, textAlign:"center", padding:"12px 4px", background:C.surfaceLight, borderRadius:8, border:`1px dashed ${C.border}` }}>Milieu vac.</div>
             ) : day.slots.length === 0 ? (
               <div style={{ fontSize:10, color:C.textDim, textAlign:"center", padding:"20px 4px" }}>—</div>
             ) : (
@@ -586,17 +618,23 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick }) =
                   onMouseLeave={e => { e.currentTarget.style.transform="none"; e.currentTarget.style.boxShadow="none"; }}
                 >
                   <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{(slot.heure_debut||"").substring(0,5)}</div>
-                  <div style={{ fontSize:10, color:C.textMuted, marginBottom:4 }}>{(slot.heure_fin||"").substring(0,5)}</div>
-                  {/* Barre de remplissage */}
+                  <div style={{ fontSize:10, color:C.textMuted, marginBottom:3 }}>{(slot.heure_fin||"").substring(0,5)}</div>
                   <div style={{ display:"flex", gap:2, marginBottom:4 }}>
                     {Array.from({length: Math.min(slot.capacite, 8)}).map((_, j) => (
-                      <div key={j} style={{ flex:1, height:4, borderRadius:2, background: j < slot.n ? slot.fillColor : C.border }} />
+                      <div key={j} style={{ flex:1, height:4, borderRadius:2, background: j < slot.inscribed ? slot.fillColor : C.border }} />
                     ))}
                   </div>
                   <div style={{ fontSize:10, fontWeight:700, color: slot.appelFait ? C.blue : slot.fillColor }}>
                     {slot.n}/{slot.capacite}
-                    {slot.appelFait ? " ✓" : ` — ${slot.fillLabel}`}
+                    {slot.absJust > 0 && !slot.appelFait && <span style={{ fontWeight:400, color:C.warning, fontSize:9 }}> (−{slot.absJust})</span>}
                   </div>
+                  {slot.appelFait ? (
+                    <div style={{ fontSize:9, color:C.blue, fontWeight:700, marginTop:2 }}>✓ Appel fait</div>
+                  ) : slot.inscribed > 0 && slot.isFuture ? (
+                    <div style={{ fontSize:9, color:C.accent, fontWeight:600, marginTop:2 }}>→ Faire l'appel</div>
+                  ) : slot.inscribed > 0 ? (
+                    <div style={{ fontSize:9, color:C.warning, fontWeight:700, marginTop:2 }}>⚡ En attente</div>
+                  ) : null}
                   <div style={{ fontSize:9, color:C.textDim, marginTop:2 }}>{(FORFAITS[slot.mode]||{}).l||slot.mode}</div>
                 </div>
               ))
@@ -763,7 +801,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const [saving, setSaving] = useState(false);
   const [addingTo, setAddingTo] = useState(null);
   const [addEleve, setAddEleve] = useState("");
-  const [addType, setAddType] = useState("occasionnel");
+  const [addType, setAddType] = useState("abonne");
   const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
   const [addHeuresDef, setAddHeuresDef] = useState(null); // durée par défaut pour cet élève
   const [showNewEleve, setShowNewEleve] = useState(false);
@@ -819,29 +857,25 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const handleArretDefinitif = async (eleveId, creneauId) => { await api.patch("affectations_creneaux", `eleve_id=eq.${eleveId}&creneau_id=eq.${creneauId}&actif=eq.true`, { actif: false }); setArretModal(null); refresh(); };
   const addOcc = async () => {
     if (!addEleve || !addingTo) return;
-    const isStageSlot = addingTo.type_creneau === "stage";
-    const joursStr = isStageSlot ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
-    const affData = { eleve_id: addEleve, creneau_id: addingTo.id, type_inscription: isStageSlot ? "stage" : addType, actif: true, jours_stage: joursStr };
+    const affData = { eleve_id: addEleve, creneau_id: addingTo.id, type_inscription: addType, actif: true, jours_stage: null };
     const checkedCount = addHoursChecks.filter(Boolean).length;
     if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
     else if (addHeuresDef) affData.heures_defaut = addHeuresDef;
-    if (!isStageSlot && addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
+    if (addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
     await api.post("affectations_creneaux", affData);
     await refresh();
-    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]);
+    setAddingTo(null); setAddEleve(""); setAddType("abonne"); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]);
   };
-  const resetAddModal = () => { setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); };
+  const resetAddModal = () => { setAddingTo(null); setAddEleve(""); setAddType("abonne"); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); };
   const addNewEleveAndInscribe = async () => {
     if (!newEleveData.prenom || !newEleveData.nom || !addingTo) return;
     const created = await api.post("eleves", { ...newEleveData, actif: true });
     const newId = Array.isArray(created) ? created[0]?.id : created?.id;
     if (!newId) return;
-    const isStageSlot = addingTo.type_creneau === "stage";
-    const joursStr = isStageSlot ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
-    const affData = { eleve_id: newId, creneau_id: addingTo.id, type_inscription: isStageSlot ? "stage" : addType, actif: true, jours_stage: joursStr };
+    const affData = { eleve_id: newId, creneau_id: addingTo.id, type_inscription: addType, actif: true, jours_stage: null };
     const checkedCount = addHoursChecks.filter(Boolean).length;
     if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
-    if (!isStageSlot && addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
+    if (addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
     await api.post("affectations_creneaux", affData);
     await refresh();
     resetAddModal();
@@ -886,6 +920,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
             presences={localPresences}
             baseDate={selectedDate}
             onDayClick={(date) => { setSelectedDate(date); setViewMode("day"); }}
+            onWeekChange={(date) => setSelectedDate(date)}
           />
         </div>
       )}
@@ -1018,15 +1053,14 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
         {addingTo && (() => {
           const isStageSlot = addingTo.type_creneau === "stage";
           const totalInscrits = affectations.filter(a => a.creneau_id === addingTo.id && a.actif).length;
-          const isRegularFull = !isStageSlot && totalInscrits >= addingTo.capacite;
-          const canAddStage = isStageSlot ? addJours.some((v, i) => v && addingJourCounts[i] < addingTo.capacite) : true;
+          const isRegularFull = totalInscrits >= addingTo.capacite && addType === "abonne";
           const dur = slotDur(addingTo);
           const nbHours = Math.floor(dur);
           const startH = parseInt((addingTo.heure_debut||"00:00").split(":")[0]);
-          const needsDates = !isStageSlot && addType === "occasionnel";
-          const canSubmit = !isRegularFull && (showNewEleve ? (newEleveData.prenom && newEleveData.nom) : (addEleve && canAddStage && (!needsDates || addDatesOccasion.length > 0)));
+          const needsDates = addType === "occasionnel";
+          const canSubmit = !isRegularFull && (showNewEleve ? (newEleveData.prenom && newEleveData.nom) : (addEleve && (!needsDates || addDatesOccasion.length > 0)));
           return (<div>
-            {isRegularFull && <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", marginBottom:14, textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet ({totalInscrits}/{addingTo.capacite} places)</div>}
+            {isRegularFull && <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", marginBottom:14, textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet pour un abonné ({totalInscrits}/{addingTo.capacite} places) — inscription occasionnelle possible</div>}
             {/* Tabs élève existant / nouvel élève */}
             <div style={{ display:"flex", gap:4, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}`, marginBottom:16 }}>
               <button onClick={() => setShowNewEleve(false)} style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"none", cursor:"pointer", background:!showNewEleve?C.accent:"transparent", color:!showNewEleve?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>👤 Élève existant</button>
@@ -1060,22 +1094,29 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
             ) : (
               <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
             )}
-            {isStageSlot ? (
-              <div style={{ marginTop:12 }}>
-                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Jours de présence</div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                  {JOURS_STAGE.map((j, i) => {
-                    const full = addingJourCounts[i] >= addingTo.capacite;
-                    const checked = addJours[i] && !full;
-                    return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 6px", borderRadius: 10, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
-                      <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange, width: 18, height: 18 }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
-                      <span style={{ fontSize: 10, color: full ? C.danger : C.textDim }}>{addingJourCounts[i]}/{addingTo.capacite}</span>
-                    </label>);
-                  })}
-                </div>
-              </div>
-            ) : (<>
+            {isStageSlot ? (<>
+              <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Toute la semaine (abonné)"],["occasionnel","⚡ Jours spécifiques"]]} />
+              {addType === "occasionnel" && (() => {
+                const vacDates = getVacationWeekDates(addingTo.periode_vacances, addingTo.semaine_vacances || 1);
+                if (!vacDates.length) return null;
+                return (<div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:12, color:C.textMuted, marginBottom:8, fontWeight:700 }}>Jours de stage <span style={{ color:C.orange }}>(cocher les dates)</span></div>
+                  <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:4 }}>
+                    {vacDates.map(d => {
+                      const sel = addDatesOccasion.includes(d);
+                      const dn = JOURS_SEMAINE[new Date(d).getDay()];
+                      return (<label key={d} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"8px 10px", borderRadius:10, border:`2px solid ${sel?C.orange:C.border}`, background:sel?C.orange+"15":"transparent", cursor:"pointer", minWidth:52 }}>
+                        <input type="checkbox" checked={sel} onChange={() => setAddDatesOccasion(prev => sel?prev.filter(x=>x!==d):[...prev,d])} style={{ accentColor:C.orange, width:16, height:16 }} />
+                        <span style={{ fontSize:10, fontWeight:700, color:sel?C.orange:C.textMuted }}>{dn.substring(0,3)}</span>
+                        <span style={{ fontSize:11, fontWeight:700, color:sel?C.orange:C.text }}>{fmtDateFr(d)}</span>
+                      </label>);
+                    })}
+                  </div>
+                  <div style={{ fontSize:11, color:C.textDim }}>{addDatesOccasion.length} jour{addDatesOccasion.length>1?"s":""} sélectionné{addDatesOccasion.length>1?"s":""}</div>
+                </div>);
+              })()}
+              {addType === "abonne" && <div style={{ background:C.orange+"12", border:`1px solid ${C.orange}33`, borderRadius:8, padding:"8px 12px", marginBottom:14, fontSize:12, color:C.orange }}>🏕️ Présent tous les jours de la semaine de stage (Lun → Ven)</div>}
+            </>) : (<>
               <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
               {addType === "occasionnel" && (() => {
                 const nextDates = getNextOccurrences(addingTo.jour, selectedDate, 10);
@@ -1437,11 +1478,13 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
   const [typeInscription, setTypeInscription] = useState("abonne");
   const [saving, setSaving] = useState(false);
   const [newForm, setNewForm] = useState({});
+  const [datesOccasion, setDatesOccasion] = useState([]);
 
   useEffect(() => {
     if (open) {
       setMode("search"); setSearch(""); setSelectedEleve(null);
       setTypeInscription("abonne"); setSaving(false);
+      setDatesOccasion(dateStr ? [dateStr] : []);
       setNewForm({ id:"", nom:"", prenom:"", classe:"6ème", forfait: slot?.mode||"groupe", actif:true, cotisation_payee:false, fiche_inscription:false, nom_parent1:"", tel_parent1:"", email:"", adresse:"", tel_parent2:"", tel_eleve:"", date_naissance:null });
     }
   }, [open, slot]);
@@ -1474,12 +1517,16 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
       eleveId = res?.[0]?.id || newForm.id;
     }
     if (eleveId) {
-      await api.post("affectations_creneaux", { eleve_id: eleveId, creneau_id: slot.id, type_inscription: typeInscription, actif: true, jours_stage: null });
+      const affData = { eleve_id: eleveId, creneau_id: slot.id, type_inscription: typeInscription, actif: true, jours_stage: null };
+      if (typeInscription === "occasionnel" && datesOccasion.length > 0) affData.dates_occasion = datesOccasion.join(",");
+      await api.post("affectations_creneaux", affData);
     }
     setSaving(false); onClose(); refresh();
   };
 
-  const canSave = mode === "search" ? !!selectedEleve : !!(newForm.nom && newForm.prenom && newForm.id);
+  const canSave = mode === "search"
+    ? (!!selectedEleve && (typeInscription !== "occasionnel" || datesOccasion.length > 0))
+    : !!(newForm.nom && newForm.prenom && newForm.id && (typeInscription !== "occasionnel" || datesOccasion.length > 0));
 
   return (
     <Modal open={open} onClose={onClose} title={`👤 Inscrire un prospect — ${slotLabel}`} wide>
@@ -1570,9 +1617,9 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
           {[
             ["abonne","🔄 Permanent","Jusqu'à la fin de l'année scolaire",C.accent],
-            ["occasionnel","⚡ Occasionnel","Ce jour uniquement (place provisoire)",C.warning]
+            ["occasionnel","⚡ Occasionnel","Séances ponctuelles (place provisoire)",C.warning]
           ].map(([k,l,sub,col]) => (
-            <div key={k} onClick={() => setTypeInscription(k)}
+            <div key={k} onClick={() => { setTypeInscription(k); if (k === "occasionnel") setDatesOccasion(dateStr ? [dateStr] : []); else setDatesOccasion([]); }}
               style={{ padding:"14px 16px", borderRadius:12, cursor:"pointer", border:`2px solid ${typeInscription===k?col:C.border}`, background:typeInscription===k?col+"12":"transparent", transition:"all 0.15s" }}>
               <div style={{ fontWeight:700, fontSize:14, color:typeInscription===k?col:C.text, marginBottom:4 }}>{l}</div>
               <div style={{ fontSize:12, color:C.textMuted }}>{sub}</div>
@@ -1580,6 +1627,30 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
           ))}
         </div>
       </div>
+
+      {/* ── Sélecteur de dates pour occasionnel ── */}
+      {typeInscription === "occasionnel" && (() => {
+        const allDates = [dateStr, ...getNextOccurrences(slot.jour, dateStr, 7)];
+        return (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 8, textTransform: "uppercase" }}>
+              Séances sélectionnées <span style={{ color: C.warning, textTransform: "none", fontWeight: 400 }}>(au moins une obligatoire)</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+              {allDates.map(d => {
+                const sel = datesOccasion.includes(d);
+                return (
+                  <label key={d} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 10px", borderRadius: 10, border: `2px solid ${sel ? C.warning : C.border}`, background: sel ? C.warning+"15" : "transparent", cursor: "pointer", minWidth: 58 }}>
+                    <input type="checkbox" checked={sel} onChange={() => setDatesOccasion(prev => sel ? prev.filter(x => x !== d) : [...prev, d])} style={{ accentColor: C.warning, width: 16, height: 16 }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: sel ? C.warning : C.text }}>{fmtDateFr(d)}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: C.textDim }}>{datesOccasion.length} séance{datesOccasion.length > 1 ? "s" : ""} sélectionnée{datesOccasion.length > 1 ? "s" : ""}</div>
+          </div>
+        );
+      })()}
 
       <div style={{ display:"flex", justifyContent:"flex-end", gap:10 }}>
         <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
@@ -1747,7 +1818,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
                     <div style={{ color:(FORFAITS[cr.mode]||{}).c||C.accent, fontWeight:600, fontSize:11 }}>{(FORFAITS[cr.mode]||{}).l||cr.mode}</div>
                     <div style={{ display:"flex", gap:4, marginTop:4, flexWrap:"wrap" }}>
                       {cr.dispo.placesLibres > 0 && <span style={{ fontSize:10, fontWeight:700, color:C.success, background:C.success+"15", borderRadius:4, padding:"1px 5px" }}>🟢 {cr.dispo.placesLibres}</span>}
-                      {cr.dispo.placesProvisoires > 0 && <span style={{ fontSize:10, fontWeight:700, color:C.warning, background:C.warning+"15", borderRadius:4, padding:"1px 5px" }}>💬 {cr.dispo.placesProvisoires}</span>}
+                      {cr.dispo.placesProvisSupp > 0 && <span style={{ fontSize:10, fontWeight:700, color:C.warning, background:C.warning+"15", borderRadius:4, padding:"1px 5px" }}>💬 {cr.dispo.placesProvisSupp}</span>}
                     </div>
                   </div>
                 ))}
