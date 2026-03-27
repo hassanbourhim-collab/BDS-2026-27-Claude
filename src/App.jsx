@@ -10,7 +10,7 @@ const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const hdrs = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", Prefer: "return=representation" };
 const api = {
   get: async (t, q = "") => { const r = await fetch(`${SB_URL}/rest/v1/${t}?${q}&order=id`, { headers: hdrs }); return r.ok ? r.json() : []; },
-  post: async (t, d) => { const r = await fetch(`${SB_URL}/rest/v1/${t}`, { method: "POST", headers: hdrs, body: JSON.stringify(d) }); return r.ok ? r.json() : null; },
+  post: async (t, d) => { const r = await fetch(`${SB_URL}/rest/v1/${t}`, { method: "POST", headers: hdrs, body: JSON.stringify(d) }); if (!r.ok) { const txt = await r.text(); console.error("[BDS] POST", t, r.status, txt); return null; } return r.json(); },
   patch: async (t, filter, d) => { const r = await fetch(`${SB_URL}/rest/v1/${t}?${filter}`, { method: "PATCH", headers: hdrs, body: JSON.stringify(d) }); return r.ok ? r.json() : null; },
   del: async (t, filter) => { const r = await fetch(`${SB_URL}/rest/v1/${t}?${filter}`, { method: "DELETE", headers: hdrs }); return r.ok; },
 };
@@ -280,8 +280,10 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
     if (!addEleve) return;
     const joursStr = isStage ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
     const affData = { eleve_id: addEleve, creneau_id: slot.id, type_inscription: isStage ? "stage" : addType, actif: true, jours_stage: joursStr };
-    if (!isStage && addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
-    await api.post("affectations_creneaux", affData);
+    const datesOcc = !isStage && addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
+    const created = await api.post("affectations_creneaux", affData);
+    const newId = Array.isArray(created) ? created[0]?.id : created?.id;
+    if (datesOcc && newId) await api.patch("affectations_creneaux", `id=eq.${newId}`, { dates_occasion: datesOcc });
     setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddDatesOccasion([]); refresh();
   };
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
@@ -861,8 +863,10 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     const checkedCount = addHoursChecks.filter(Boolean).length;
     if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
     else if (addHeuresDef) affData.heures_defaut = addHeuresDef;
-    if (addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
-    await api.post("affectations_creneaux", affData);
+    const datesOcc = addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
+    const created = await api.post("affectations_creneaux", affData);
+    const newId = Array.isArray(created) ? created[0]?.id : created?.id;
+    if (datesOcc && newId) await api.patch("affectations_creneaux", `id=eq.${newId}`, { dates_occasion: datesOcc });
     await refresh();
     setAddingTo(null); setAddEleve(""); setAddType("abonne"); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]);
   };
@@ -875,8 +879,10 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     const affData = { eleve_id: newId, creneau_id: addingTo.id, type_inscription: addType, actif: true, jours_stage: null };
     const checkedCount = addHoursChecks.filter(Boolean).length;
     if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
-    if (addType === "occasionnel" && addDatesOccasion.length > 0) affData.dates_occasion = addDatesOccasion.join(",");
-    await api.post("affectations_creneaux", affData);
+    const datesOcc = addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
+    const createdAff = await api.post("affectations_creneaux", affData);
+    const newAffId = Array.isArray(createdAff) ? createdAff[0]?.id : createdAff?.id;
+    if (datesOcc && newAffId) await api.patch("affectations_creneaux", `id=eq.${newAffId}`, { dates_occasion: datesOcc });
     await refresh();
     resetAddModal();
   };
@@ -1518,8 +1524,10 @@ const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affect
     }
     if (eleveId) {
       const affData = { eleve_id: eleveId, creneau_id: slot.id, type_inscription: typeInscription, actif: true, jours_stage: null };
-      if (typeInscription === "occasionnel" && datesOccasion.length > 0) affData.dates_occasion = datesOccasion.join(",");
-      await api.post("affectations_creneaux", affData);
+      const datesOcc = typeInscription === "occasionnel" && datesOccasion.length > 0 ? datesOccasion.join(",") : null;
+      const createdAff = await api.post("affectations_creneaux", affData);
+      const newAffId = Array.isArray(createdAff) ? createdAff[0]?.id : createdAff?.id;
+      if (datesOcc && newAffId) await api.patch("affectations_creneaux", `id=eq.${newAffId}`, { dates_occasion: datesOcc });
     }
     setSaving(false); onClose(); refresh();
   };
