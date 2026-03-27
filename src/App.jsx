@@ -57,7 +57,6 @@ const MOIS_LABELS = { "Août":"Août","Septembre":"Sept","Octobre":"Oct","Novemb
 const MOIS_ORDER = ["Août","Septembre","Octobre","Novembre","Décembre","Janvier","Février","Mars","Avril","Mai","Juin","Juillet"];
 const JOURS_SEMAINE = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
 const JOURS_ALL = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
-const PERIODES = ALL_VACANCES.map(v => [v.id, v.label]);
 const JOURS_STAGE = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi"];
 
 // ═══ VACANCES ZONE B 2025-2026 ═══
@@ -78,6 +77,7 @@ const VACANCES_2627 = [
 ];
 
 const ALL_VACANCES = [...VACANCES_2526, ...VACANCES_2627];
+const PERIODES = ALL_VACANCES.map(v => [v.id, v.label]);
 
 const getDateContext = (dateStr) => {
   const d = new Date(dateStr);
