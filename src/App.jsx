@@ -740,6 +740,9 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const [addType, setAddType] = useState("occasionnel");
   const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
   const [addHeuresDef, setAddHeuresDef] = useState(null); // durée par défaut pour cet élève
+  const [showNewEleve, setShowNewEleve] = useState(false);
+  const [newEleveData, setNewEleveData] = useState({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" });
+  const [addHoursChecks, setAddHoursChecks] = useState([]); // per-hour checkboxes for slots ≥ 2h
   const [slotDetail, setSlotDetail] = useState(null);
   const [arretModal, setArretModal] = useState(null); // { st, slot }
   const [validatingSlot, setValidatingSlot] = useState(null); // slot with students
@@ -791,9 +794,27 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     const isStageSlot = addingTo.type_creneau === "stage";
     const joursStr = isStageSlot ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
     const affData = { eleve_id: addEleve, creneau_id: addingTo.id, type_inscription: isStageSlot ? "stage" : addType, actif: true, jours_stage: joursStr };
-    if (addHeuresDef) affData.heures_defaut = addHeuresDef;
+    const checkedCount = addHoursChecks.filter(Boolean).length;
+    if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
+    else if (addHeuresDef) affData.heures_defaut = addHeuresDef;
     await api.post("affectations_creneaux", affData);
-    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); refresh();
+    await refresh();
+    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]);
+  };
+  const addNewEleveAndInscribe = async () => {
+    if (!newEleveData.prenom || !newEleveData.nom || !addingTo) return;
+    const created = await api.post("eleves", { ...newEleveData, actif: true });
+    const newId = Array.isArray(created) ? created[0]?.id : created?.id;
+    if (!newId) return;
+    const isStageSlot = addingTo.type_creneau === "stage";
+    const joursStr = isStageSlot ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
+    const affData = { eleve_id: newId, creneau_id: addingTo.id, type_inscription: isStageSlot ? "stage" : addType, actif: true, jours_stage: joursStr };
+    const checkedCount = addHoursChecks.filter(Boolean).length;
+    if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
+    await api.post("affectations_creneaux", affData);
+    await refresh();
+    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null);
+    setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); setAddHoursChecks([]);
   };
 
   const stats = useMemo(() => { let t=0,p=0,a=0,pe=0; daySlots.forEach(s => s.students.forEach(st => { t++; if(st.presence){st.presence.statut==="present"?p++:a++;}else pe++; })); return { t,p,a,pe }; }, [daySlots]);
@@ -963,14 +984,50 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
       )}
       </>}
 
-      <Modal open={!!addingTo} onClose={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); }} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
+      <Modal open={!!addingTo} onClose={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); setAddHoursChecks([]); }} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
         {addingTo && (() => {
           const isStageSlot = addingTo.type_creneau === "stage";
           const canAddStage = isStageSlot ? addJours.some((v, i) => v && addingJourCounts[i] < addingTo.capacite) : true;
+          const dur = slotDur(addingTo);
+          const nbHours = Math.floor(dur);
+          const startH = parseInt((addingTo.heure_debut||"00:00").split(":")[0]);
+          const canSubmit = showNewEleve ? (newEleveData.prenom && newEleveData.nom) : (addEleve && canAddStage);
           return (<div>
-            <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
-            {isStageSlot ? (
+            {/* Tabs élève existant / nouvel élève */}
+            <div style={{ display:"flex", gap:4, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}`, marginBottom:16 }}>
+              <button onClick={() => setShowNewEleve(false)} style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"none", cursor:"pointer", background:!showNewEleve?C.accent:"transparent", color:!showNewEleve?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>👤 Élève existant</button>
+              <button onClick={() => setShowNewEleve(true)} style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"none", cursor:"pointer", background:showNewEleve?C.accent:"transparent", color:showNewEleve?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>➕ Nouvel élève</button>
+            </div>
+            {showNewEleve ? (
               <div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                  <div>
+                    <div style={{ fontSize:12, color:C.textMuted, marginBottom:4, fontWeight:600 }}>Prénom *</div>
+                    <input value={newEleveData.prenom} onChange={e => setNewEleveData(p => ({...p, prenom:e.target.value}))} placeholder="Prénom" style={{ width:"100%", padding:"10px 12px", background:C.surfaceLight, border:`2px solid ${C.border}`, borderRadius:8, color:C.text, fontSize:14, boxSizing:"border-box" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:12, color:C.textMuted, marginBottom:4, fontWeight:600 }}>Nom *</div>
+                    <input value={newEleveData.nom} onChange={e => setNewEleveData(p => ({...p, nom:e.target.value}))} placeholder="Nom" style={{ width:"100%", padding:"10px 12px", background:C.surfaceLight, border:`2px solid ${C.border}`, borderRadius:8, color:C.text, fontSize:14, boxSizing:"border-box" }} />
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:10 }}>
+                  <Input label="Classe" value={newEleveData.classe} onChange={v => setNewEleveData(p => ({...p, classe:v}))} options={CLASSES.map(c => [c,c])} />
+                  <Input label="Forfait" value={newEleveData.forfait} onChange={v => setNewEleveData(p => ({...p, forfait:v}))} options={Object.entries(FORFAITS).map(([k,f]) => [k, f.l])} />
+                </div>
+                <div style={{ marginTop:10 }}>
+                  <div style={{ fontSize:12, color:C.textMuted, marginBottom:4, fontWeight:600 }}>Nom parent</div>
+                  <input value={newEleveData.nom_parent1} onChange={e => setNewEleveData(p => ({...p, nom_parent1:e.target.value}))} placeholder="Nom du parent" style={{ width:"100%", padding:"10px 12px", background:C.surfaceLight, border:`2px solid ${C.border}`, borderRadius:8, color:C.text, fontSize:14, boxSizing:"border-box" }} />
+                </div>
+                <div style={{ marginTop:10 }}>
+                  <div style={{ fontSize:12, color:C.textMuted, marginBottom:4, fontWeight:600 }}>Tél parent</div>
+                  <input value={newEleveData.tel_parent1} onChange={e => setNewEleveData(p => ({...p, tel_parent1:e.target.value}))} placeholder="+33600000000" style={{ width:"100%", padding:"10px 12px", background:C.surfaceLight, border:`2px solid ${C.border}`, borderRadius:8, color:C.text, fontSize:14, boxSizing:"border-box" }} />
+                </div>
+              </div>
+            ) : (
+              <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
+            )}
+            {isStageSlot ? (
+              <div style={{ marginTop:12 }}>
                 <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Jours de présence</div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
                   {JOURS_STAGE.map((j, i) => {
@@ -987,15 +1044,28 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
             ) : (
               <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
             )}
-            {addingTo && (() => {
-              const dur = slotDur(addingTo);
-              const opts = [["","Durée complète (" + dur + "h)"]];
-              for (let h = 0.5; h < dur; h += 0.5) opts.push([String(h), h + "h seulement"]);
-              return opts.length > 1 ? <Input label="Durée habituelle" value={addHeuresDef ? String(addHeuresDef) : ""} onChange={v => setAddHeuresDef(v ? parseFloat(v) : null)} options={opts} /> : null;
-            })()}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
-              <Btn onClick={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); }} color={C.textMuted} outline>Annuler</Btn>
-              <Btn onClick={addOcc} disabled={!addEleve || !canAddStage}>Ajouter</Btn>
+            {nbHours >= 2 ? (
+              <div style={{ marginTop:12, marginBottom:6 }}>
+                <div style={{ fontSize:12, color:C.textMuted, marginBottom:8, fontWeight:700 }}>Heures suivies</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  {Array.from({length:nbHours}, (_,i) => {
+                    const checked = addHoursChecks.length > 0 ? addHoursChecks[i] !== false : true;
+                    const label = `${startH+i}h–${startH+i+1}h`;
+                    return (<label key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, padding:"10px 6px", borderRadius:10, border:`2px solid ${checked ? C.accent : C.border}`, background:checked ? C.accent+"15" : "transparent", cursor:"pointer" }}>
+                      <input type="checkbox" checked={checked} onChange={() => {
+                        const nc = addHoursChecks.length > 0 ? [...addHoursChecks] : Array(nbHours).fill(true);
+                        nc[i] = !nc[i];
+                        setAddHoursChecks(nc);
+                      }} style={{ accentColor:C.accent, width:18, height:18 }} />
+                      <span style={{ fontSize:12, fontWeight:700, color:checked ? C.accent : C.textMuted }}>{label}</span>
+                    </label>);
+                  })}
+                </div>
+              </div>
+            ) : null}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
+              <Btn onClick={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); setAddHoursChecks([]); }} color={C.textMuted} outline>Annuler</Btn>
+              <Btn onClick={showNewEleve ? addNewEleveAndInscribe : addOcc} disabled={!canSubmit}>Ajouter</Btn>
             </div>
           </div>);
         })()}
