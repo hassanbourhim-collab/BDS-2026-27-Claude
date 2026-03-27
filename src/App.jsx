@@ -57,21 +57,32 @@ const MOIS_LABELS = { "Août":"Août","Septembre":"Sept","Octobre":"Oct","Novemb
 const MOIS_ORDER = ["Août","Septembre","Octobre","Novembre","Décembre","Janvier","Février","Mars","Avril","Mai","Juin","Juillet"];
 const JOURS_SEMAINE = ["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
 const JOURS_ALL = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
-const PERIODES = [["toussaint","🍂 Toussaint"],["noel","🎄 Noël"],["hiver","❄️ Hiver"],["printemps","🌸 Printemps"]];
+const PERIODES = ALL_VACANCES.map(v => [v.id, v.label]);
 const JOURS_STAGE = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi"];
 
 // ═══ VACANCES ZONE B 2025-2026 ═══
 const VACANCES_2526 = [
-  { id: "toussaint", label: "🍂 Toussaint", s1d: "2025-10-20", s1f: "2025-10-24", s2d: "2025-10-27", s2f: "2025-10-31", samMilieu: "2025-10-25" },
-  { id: "noel",      label: "🎄 Noël",      s1d: "2025-12-22", s1f: "2025-12-26", s2d: "2025-12-29", s2f: "2026-01-02", samMilieu: "2025-12-27" },
-  { id: "hiver",     label: "❄️ Hiver",     s1d: "2026-02-16", s1f: "2026-02-20", s2d: "2026-02-23", s2f: "2026-02-27", samMilieu: "2026-02-21" },
-  { id: "printemps", label: "🌸 Printemps",  s1d: "2026-04-13", s1f: "2026-04-17", s2d: "2026-04-20", s2f: "2026-04-24", samMilieu: "2026-04-18" },
+  { id: "toussaint", label: "🍂 Toussaint 25-26", s1d: "2025-10-20", s1f: "2025-10-24", s2d: "2025-10-27", s2f: "2025-10-31", samMilieu: "2025-10-25" },
+  { id: "noel",      label: "🎄 Noël 25-26",      s1d: "2025-12-22", s1f: "2025-12-26", s2d: "2025-12-29", s2f: "2026-01-02", samMilieu: "2025-12-27" },
+  { id: "hiver",     label: "❄️ Hiver 25-26",     s1d: "2026-02-16", s1f: "2026-02-20", s2d: "2026-02-23", s2f: "2026-02-27", samMilieu: "2026-02-21" },
+  { id: "printemps", label: "🌸 Printemps 25-26",  s1d: "2026-04-13", s1f: "2026-04-17", s2d: "2026-04-20", s2f: "2026-04-24", samMilieu: "2026-04-18" },
 ];
+
+// ═══ VACANCES ZONE B 2026-2027 ═══
+// ⚠️ Dates approximatives Zone B — vérifier sur education.gouv.fr
+const VACANCES_2627 = [
+  { id: "toussaint_27", label: "🍂 Toussaint 26-27", s1d: "2026-10-19", s1f: "2026-10-23", s2d: "2026-10-26", s2f: "2026-10-30", samMilieu: "2026-10-24" },
+  { id: "noel_27",      label: "🎄 Noël 26-27",      s1d: "2026-12-21", s1f: "2026-12-25", s2d: "2026-12-28", s2f: "2027-01-01", samMilieu: "2026-12-26" },
+  { id: "hiver_27",     label: "❄️ Hiver 26-27",     s1d: "2027-02-15", s1f: "2027-02-19", s2d: "2027-02-22", s2f: "2027-02-26", samMilieu: "2027-02-20" },
+  { id: "printemps_27", label: "🌸 Printemps 26-27", s1d: "2027-04-12", s1f: "2027-04-16", s2d: "2027-04-19", s2f: "2027-04-23", samMilieu: "2027-04-17" },
+];
+
+const ALL_VACANCES = [...VACANCES_2526, ...VACANCES_2627];
 
 const getDateContext = (dateStr) => {
   const d = new Date(dateStr);
   const dow = d.getDay();
-  for (const v of VACANCES_2526) {
+  for (const v of ALL_VACANCES) {
     if (dateStr === v.samMilieu) return { type: "samedi_milieu", vacance: v, semaine: null };
     if (dateStr >= v.s1d && dateStr <= v.s1f && dow >= 1 && dow <= 5) return { type: "vacances", vacance: v, semaine: 1 };
     if (dateStr >= v.s2d && dateStr <= v.s2f && dow >= 1 && dow <= 5) return { type: "vacances", vacance: v, semaine: 2 };
@@ -199,7 +210,7 @@ const CreneauModal = ({ open, onClose, creneau, refresh }) => {
   return (
     <Modal open={open} onClose={onClose} title={creneau ? "✏️ Modifier créneau" : "➕ Nouveau créneau"}>
       <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
-        {[["regulier","📅 Régulier"],["stage","🏕️ Stage"]].map(([k,l]) => (
+        {[["regulier","📅 Régulier"],["stage","🏖️ Vacances"]].map(([k,l]) => (
           <div key={k} onClick={() => setForm({...form, type_creneau: k})} style={{ flex: 1, padding: 12, borderRadius: 10, textAlign: "center", cursor: "pointer", border: `2px solid ${form.type_creneau===k?(k==="stage"?C.orange:C.accent):C.border}`, background: form.type_creneau===k?(k==="stage"?C.orange:C.accent)+"15":"transparent", color: form.type_creneau===k?C.text:C.textMuted, fontWeight: 700, fontSize: 14 }}>{l}</div>
         ))}
       </div>
@@ -225,7 +236,7 @@ const CreneauModal = ({ open, onClose, creneau, refresh }) => {
         <Input label="Mode" value={form.mode} onChange={v => setForm({...form, mode: v})} options={Object.entries(FORFAITS).map(([k,v]) => [k, `${v.l} (${v.t}€/h)`])} />
         <Input label="Capacité" value={form.capacite} onChange={v => setForm({...form, capacite: v})} type="number" />
       </div>
-      {isStage && <div style={{ background: C.orange+"15", borderRadius: 10, padding: 12, marginTop: 6, fontSize: 12, color: C.orange, border: `1px solid ${C.orange}33` }}>🏕️ Ce créneau horaire apparaîtra <b>du lundi au vendredi</b> de la semaine {form.semaine_vacances} des vacances {PERIODES.find(p=>p[0]===form.periode_vacances)?.[1]||""}.</div>}
+      {isStage && <div style={{ background: C.orange+"15", borderRadius: 10, padding: 12, marginTop: 6, fontSize: 12, color: C.orange, border: `1px solid ${C.orange}33` }}>🏖️ Ce créneau apparaîtra <b>du lundi au vendredi</b> (semaine {form.semaine_vacances}) des vacances {ALL_VACANCES.find(v=>v.id===form.periode_vacances)?.label||""}.</div>}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
         <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
         <Btn onClick={save} disabled={saving} color={isStage?C.orange:C.accent}>{saving?"...":creneau?"Modifier":"Créer"}</Btn>
@@ -728,6 +739,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const [addEleve, setAddEleve] = useState("");
   const [addType, setAddType] = useState("occasionnel");
   const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
+  const [addHeuresDef, setAddHeuresDef] = useState(null); // durée par défaut pour cet élève
   const [slotDetail, setSlotDetail] = useState(null);
   const [arretModal, setArretModal] = useState(null); // { st, slot }
   const [validatingSlot, setValidatingSlot] = useState(null); // slot with students
@@ -762,7 +774,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
       const assigned = affectations.filter(a => a.creneau_id === cr.id && a.actif);
       const students = assigned.map(a => {
         if (cr.type_creneau === "stage" && a.jours_stage && !a.jours_stage.includes(dayName)) return null;
-        const el = eleves.find(e => e.id === a.eleve_id); const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id); return el ? { ...el, type_inscription: a.type_inscription, presence: pres, affectation_id: a.id, jours_stage: a.jours_stage } : null;
+        const el = eleves.find(e => e.id === a.eleve_id); const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id); return el ? { ...el, type_inscription: a.type_inscription, presence: pres, affectation_id: a.id, jours_stage: a.jours_stage, heures_defaut: a.heures_defaut || null } : null;
       }).filter(Boolean);
       return { ...cr, students, dur: slotDur(cr) };
     });
@@ -771,15 +783,17 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const markPresent = async (eid, cid, h) => { setSaving(true); await api.post("presences", { eleve_id: eid, date_cours: selectedDate, creneau_id: cid, statut: "present", heures: h }); await loadPresences(); setSaving(false); };
   const markAbsent = async (eid, cid, m) => { setSaving(true); await api.post("presences", { eleve_id: eid, date_cours: selectedDate, creneau_id: cid, statut: m, heures: 0 }); await loadPresences(); setSaving(false); };
   const removePresence = async (pid) => { await api.del("presences", `id=eq.${pid}`); await loadPresences(); };
-  const markAllPresent = async (slot) => { setSaving(true); for (const st of slot.students) { if (!st.presence) await api.post("presences", { eleve_id: st.id, date_cours: selectedDate, creneau_id: slot.id, statut: "present", heures: slot.dur }); } await loadPresences(); setSaving(false); };
+  const markAllPresent = async (slot) => { setSaving(true); for (const st of slot.students) { if (!st.presence) await api.post("presences", { eleve_id: st.id, date_cours: selectedDate, creneau_id: slot.id, statut: "present", heures: st.heures_defaut || slot.dur }); } await loadPresences(); setSaving(false); };
   const adjustDuration = async (pid, newH) => { if (newH < 0.5) return; await api.patch("presences", `id=eq.${pid}`, { heures: newH }); await loadPresences(); };
   const handleArretDefinitif = async (eleveId, creneauId) => { await api.patch("affectations_creneaux", `eleve_id=eq.${eleveId}&creneau_id=eq.${creneauId}&actif=eq.true`, { actif: false }); setArretModal(null); refresh(); };
   const addOcc = async () => {
     if (!addEleve || !addingTo) return;
     const isStageSlot = addingTo.type_creneau === "stage";
     const joursStr = isStageSlot ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
-    await api.post("affectations_creneaux", { eleve_id: addEleve, creneau_id: addingTo.id, type_inscription: isStageSlot ? "stage" : addType, actif: true, jours_stage: joursStr });
-    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); refresh();
+    const affData = { eleve_id: addEleve, creneau_id: addingTo.id, type_inscription: isStageSlot ? "stage" : addType, actif: true, jours_stage: joursStr };
+    if (addHeuresDef) affData.heures_defaut = addHeuresDef;
+    await api.post("affectations_creneaux", affData);
+    setAddingTo(null); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); refresh();
   };
 
   const stats = useMemo(() => { let t=0,p=0,a=0,pe=0; daySlots.forEach(s => s.students.forEach(st => { t++; if(st.presence){st.presence.statut==="present"?p++:a++;}else pe++; })); return { t,p,a,pe }; }, [daySlots]);
@@ -787,7 +801,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const moveDate = (dir) => { const d = new Date(selectedDate); d.setDate(d.getDate()+dir); setSelectedDate(d.toISOString().split("T")[0]); };
   const moveWeek = (dir) => { const d = new Date(selectedDate); d.setDate(d.getDate()+dir*7); setSelectedDate(d.toISOString().split("T")[0]); };
   const ctxColor = dateCtx.type==="vacances"?C.orange:dateCtx.type==="samedi_milieu"?C.textDim:C.accent;
-  const ctxLabel = dateCtx.type==="vacances"?`🏕️ Stage ${dateCtx.vacance.label} — Semaine ${dateCtx.semaine}`:dateCtx.type==="samedi_milieu"?"😴 Samedi milieu — pas de cours":"📚 Période scolaire";
+  const ctxLabel = dateCtx.type==="vacances"?`🏖️ Vacances ${dateCtx.vacance.label} — Semaine ${dateCtx.semaine}`:dateCtx.type==="samedi_milieu"?"😴 Samedi milieu — pas de cours":"📚 Période scolaire";
 
   return (
     <div>
@@ -844,7 +858,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
       ) : daySlots.length === 0 ? (
         <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ fontSize: 50, marginBottom: 12 }}>{dateCtx.type==="vacances"?"🏕️":"📅"}</div>
-          <div style={{ color: C.textMuted, fontSize: 15 }}>Aucun créneau {dateCtx.type==="vacances"?`de stage (${dateCtx.vacance.label} S${dateCtx.semaine})`:"régulier"} pour {dayName}</div>
+          <div style={{ color: C.textMuted, fontSize: 15 }}>Aucun créneau {dateCtx.type==="vacances"?`vacances (${dateCtx.vacance.label} S${dateCtx.semaine})`:"régulier"} pour {dayName}</div>
           <div style={{ color: C.textDim, fontSize: 13, marginTop: 8 }}>Créez-en depuis la page Créneaux</div>
         </div>
       ) : (
@@ -862,7 +876,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
                       <span style={{ fontWeight: 800, fontSize: 18, color: C.text }}>{(slot.heure_debut||"").substring(0,5)} — {(slot.heure_fin||"").substring(0,5)}</span>
                       <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarif}€/h</Badge>
                       <Badge color={C.textMuted}>{slot.students.length}/{slot.capacite}</Badge>
-                      {slot.type_creneau==="stage" && <Badge color={C.orange}>Stage S{slot.semaine_vacances} · {dayName}</Badge>}
+                      {slot.type_creneau==="stage" && <Badge color={C.orange}>🏖️ Vacances S{slot.semaine_vacances} · {dayName}</Badge>}
                       {placesProvisoires > 0 && <Badge color={C.warning}>💬 {placesProvisoires} place{placesProvisoires>1?"s":""} provisoire{placesProvisoires>1?"s":""}</Badge>}
                       {placesLibres > 0 && slot.students.length < slot.capacite && !placesProvisoires && <Badge color={C.success}>🟢 {placesLibres} place{placesLibres>1?"s":""} libre{placesLibres>1?"s":""}</Badge>}
                     </div>
@@ -893,6 +907,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
                             <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>
                             {st.jours_stage && st.jours_stage.split(",").length < 5 && <span style={{ fontSize: 10, color: C.orange, fontWeight: 600 }}>{st.jours_stage.split(",").length}j</span>}
                             {st.type_inscription==="occasionnel" && <Badge color={C.warning}>Occ.</Badge>}
+                            {st.heures_defaut && st.heures_defaut !== slot.dur && <Badge color={C.purple}>{st.heures_defaut}h</Badge>}
                             <span style={{ fontSize: 11, color: C.textDim }}>{st.classe}</span>
                             {/* Arrêt définitif */}
                             {!p && st.type_inscription !== "occasionnel" && (
@@ -931,7 +946,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
                               </>
                             ) : (
                               <>
-                                <Btn small onClick={() => markPresent(st.id, slot.id, slot.dur)} color={C.success} title="Présent — facturé">✓ Présent</Btn>
+                                <Btn small onClick={() => markPresent(st.id, slot.id, st.heures_defaut || slot.dur)} color={C.success} title="Présent — facturé">✓ Présent</Btn>
                                 <Btn small onClick={() => markAbsent(st.id, slot.id, "absent_justifie")} color={C.warning} outline title="Absent prévenu — non facturé, place provisoire">🏥 Prévenu</Btn>
                                 <Btn small onClick={() => markAbsent(st.id, slot.id, "absent_non_justifie")} color={C.danger} outline title="Absent non prévenu — facturé quand même">❌ Non prévenu</Btn>
                               </>
@@ -972,6 +987,12 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
             ) : (
               <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
             )}
+            {addingTo && (() => {
+              const dur = slotDur(addingTo);
+              const opts = [["","Durée complète (" + dur + "h)"]];
+              for (let h = 0.5; h < dur; h += 0.5) opts.push([String(h), h + "h seulement"]);
+              return opts.length > 1 ? <Input label="Durée habituelle" value={addHeuresDef ? String(addHeuresDef) : ""} onChange={v => setAddHeuresDef(v ? parseFloat(v) : null)} options={opts} /> : null;
+            })()}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 10 }}>
               <Btn onClick={() => { setAddingTo(null); setAddJours(JOURS_STAGE.map(() => true)); }} color={C.textMuted} outline>Annuler</Btn>
               <Btn onClick={addOcc} disabled={!addEleve || !canAddStage}>Ajouter</Btn>
