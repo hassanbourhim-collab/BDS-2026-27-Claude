@@ -101,7 +101,8 @@ const DEFAULT_SETTINGS = {
   nomExpediteurSMS: "BdS Hassan",
   tarifGroupe: 15, tarifReduit: 20, tarifIndividuel: 35, tarifStage: 15, cotisation: 30,
   adresse: "", telephone: "", email: "", siret: "",
-  anneeScolaire: "2025-2026", capaciteGroupeMax: 6,
+  anneeScolaire: "2025-2026",
+  capaciteGroupe: 6, capaciteReduit: 3, capaciteDuo: 2, capaciteStage: 6,
 };
 const loadSettings = () => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("bds_settings") || "{}") }; } catch { return { ...DEFAULT_SETTINGS }; } };
 let _s = loadSettings();
@@ -2301,12 +2302,32 @@ const FinancePage = ({ eleves, suiviMensuel, paiements }) => {
 };
 
 // ═══ PAGE PARAMÈTRES ═══
+// ParamSection et ParamField définis au niveau module (jamais à l'intérieur d'un composant)
+// pour éviter le re-mount à chaque frappe qui fait sauter le curseur.
+const ParamSection = ({ title, children }) => (
+  <div style={{ background: C.surface, borderRadius: 16, border: `1px solid ${C.border}`, padding: 24, marginBottom: 20 }}>
+    <div style={{ fontSize: 13, fontWeight: 700, color: C.accent, textTransform: "uppercase", letterSpacing: 1, marginBottom: 18 }}>{title}</div>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>{children}</div>
+  </div>
+);
+
+const ParamField = ({ label, value, onChange, type = "text", max, hint }) => (
+  <div>
+    <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 6 }}>
+      {label}{hint && <span style={{ fontWeight: 400, color: C.textDim }}> ({hint})</span>}
+    </div>
+    <input type={type} value={value ?? ""} maxLength={max}
+      onChange={e => onChange(type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)}
+      style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+  </div>
+);
+
 const ParametresPage = () => {
   const { settings, saveSettings } = useSettings();
   const [form, setForm] = useState({ ...settings });
   const [saved, setSaved] = useState(false);
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const set = (k) => (v) => setForm(f => ({ ...f, [k]: v }));
 
   const handleSave = () => {
     saveSettings({ ...form });
@@ -2314,58 +2335,45 @@ const ParametresPage = () => {
     setTimeout(() => setSaved(false), 2500);
   };
 
-  const Section = ({ title, children }) => (
-    <div style={{ background: C.surface, borderRadius: 16, border: `1px solid ${C.border}`, padding: 24, marginBottom: 20 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: C.accent, textTransform: "uppercase", letterSpacing: 1, marginBottom: 18 }}>{title}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>{children}</div>
-    </div>
-  );
-
-  const Field = ({ label, k, type = "text", max, hint }) => (
-    <div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: C.textMuted, marginBottom: 6 }}>{label}{hint && <span style={{ fontWeight: 400, color: C.textDim }}> ({hint})</span>}</div>
-      <input type={type} value={form[k] ?? ""} maxLength={max}
-        onChange={e => set(k, type === "number" ? parseFloat(e.target.value) || 0 : e.target.value)}
-        style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.bg, color: C.text, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
-    </div>
-  );
-
   return (
     <div style={{ maxWidth: 800, margin: "0 auto" }}>
-      <Section title="🏫 Structure">
-        <Field label="Nom de la structure" k="nomStructure" />
-        <Field label="Année scolaire" k="anneeScolaire" hint="ex: 2025-2026" />
-        <Field label="Adresse" k="adresse" />
-        <Field label="Téléphone" k="telephone" />
-        <Field label="Email" k="email" />
-        <Field label="SIRET" k="siret" />
-      </Section>
+      <ParamSection title="🏫 Structure">
+        <ParamField label="Nom de la structure" value={form.nomStructure} onChange={set("nomStructure")} />
+        <ParamField label="Année scolaire" value={form.anneeScolaire} onChange={set("anneeScolaire")} hint="ex: 2025-2026" />
+        <ParamField label="Adresse" value={form.adresse} onChange={set("adresse")} />
+        <ParamField label="Téléphone" value={form.telephone} onChange={set("telephone")} />
+        <ParamField label="Email" value={form.email} onChange={set("email")} />
+        <ParamField label="SIRET" value={form.siret} onChange={set("siret")} />
+      </ParamSection>
 
-      <Section title="💶 Tarifs (€/heure)">
-        <Field label="Groupe" k="tarifGroupe" type="number" />
-        <Field label="Réduit (Triple / Double)" k="tarifReduit" type="number" />
-        <Field label="Individuel" k="tarifIndividuel" type="number" />
-        <Field label="Stage" k="tarifStage" type="number" />
-        <Field label="Cotisation annuelle (€/famille)" k="cotisation" type="number" />
-      </Section>
+      <ParamSection title="💶 Tarifs (€/heure)">
+        <ParamField label="Groupe" value={form.tarifGroupe} onChange={set("tarifGroupe")} type="number" />
+        <ParamField label="Réduit (Triple / Double)" value={form.tarifReduit} onChange={set("tarifReduit")} type="number" />
+        <ParamField label="Individuel" value={form.tarifIndividuel} onChange={set("tarifIndividuel")} type="number" />
+        <ParamField label="Stage" value={form.tarifStage} onChange={set("tarifStage")} type="number" />
+        <ParamField label="Cotisation annuelle (€/famille)" value={form.cotisation} onChange={set("cotisation")} type="number" />
+      </ParamSection>
 
-      <Section title="👥 Groupes">
-        <Field label="Capacité max par groupe" k="capaciteGroupeMax" type="number" hint="places" />
-      </Section>
+      <ParamSection title="🪑 Capacités (places max)">
+        <ParamField label="Groupe" value={form.capaciteGroupe} onChange={set("capaciteGroupe")} type="number" hint="défaut 6" />
+        <ParamField label="Groupe Réduit" value={form.capaciteReduit} onChange={set("capaciteReduit")} type="number" hint="défaut 3" />
+        <ParamField label="Duo" value={form.capaciteDuo} onChange={set("capaciteDuo")} type="number" hint="défaut 2" />
+        <ParamField label="Stage" value={form.capaciteStage} onChange={set("capaciteStage")} type="number" hint="défaut 6" />
+      </ParamSection>
 
-      <Section title="📱 SMS">
-        <Field label="Expéditeur SMS" k="nomExpediteurSMS" max={11} hint="11 car. max" />
+      <ParamSection title="📱 SMS">
+        <ParamField label="Expéditeur SMS" value={form.nomExpediteurSMS} onChange={set("nomExpediteurSMS")} max={11} hint="11 car. max" />
         <div style={{ display: "flex", alignItems: "flex-end", paddingBottom: 4 }}>
           <div style={{ background: C.surfaceLight, borderRadius: 10, padding: "10px 16px", fontSize: 13 }}>
             <span style={{ color: C.textMuted, fontSize: 11 }}>Aperçu :</span><br />
             <strong style={{ color: C.text }}>De : {form.nomExpediteurSMS || "—"}</strong>
-            {form.nomExpediteurSMS?.length > 11 && <div style={{ color: C.danger, fontSize: 11, marginTop: 4 }}>⚠ Trop long (max 11 caractères)</div>}
+            {(form.nomExpediteurSMS?.length || 0) > 11 && <div style={{ color: C.danger, fontSize: 11, marginTop: 4 }}>⚠ Trop long (max 11 caractères)</div>}
           </div>
         </div>
-      </Section>
+      </ParamSection>
 
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        <button onClick={handleSave} disabled={form.nomExpediteurSMS?.length > 11}
+        <button onClick={handleSave} disabled={(form.nomExpediteurSMS?.length || 0) > 11}
           style={{ padding: "12px 28px", borderRadius: 12, border: "none", background: C.accent, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
           ✓ Enregistrer les paramètres
         </button>
