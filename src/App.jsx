@@ -396,7 +396,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
 
   const actifs = eleves.filter(e => e.actif).length;
   const smart = getSmartDay();
-  const dayName = JOURS_SEMAINE[new Date(smart.date).getDay()];
+  const dayName = JOURS_SEMAINE[new Date(smart.date + "T12:00:00").getDay()];
 
   const classeData = useMemo(() => { const c = {}; eleves.filter(e => e.actif).forEach(e => { if (e.classe) c[e.classe] = (c[e.classe]||0)+1; }); return CLASSES.map(cl => ({ name: cl, value: c[cl]||0 })).filter(d => d.value > 0); }, [eleves]);
 
@@ -524,7 +524,7 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick, onW
 
   const weekData = useMemo(() => weekDates.map(dateStr => {
     const ctx = getDateContext(dateStr);
-    const dow = new Date(dateStr).getDay();
+    const dow = new Date(dateStr + "T12:00:00").getDay();
     const dayName = JOURS_SEMAINE[dow];
     let slots = [];
     if (ctx.type !== "samedi_milieu" && dow !== 0) {
@@ -830,9 +830,9 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     return JOURS_STAGE.map(j => affs.filter(a => !a.jours_stage || a.jours_stage.includes(j)).length);
   }, [addingTo, affectations]);
 
-  const dayName = useMemo(() => JOURS_SEMAINE[new Date(selectedDate).getDay()], [selectedDate]);
+  const dayName = useMemo(() => JOURS_SEMAINE[new Date(selectedDate + "T12:00:00").getDay()], [selectedDate]);
   const dateCtx = useMemo(() => getDateContext(selectedDate), [selectedDate]);
-  const dow = new Date(selectedDate).getDay();
+  const dow = new Date(selectedDate + "T12:00:00").getDay();
 
   const isCoursDay = useMemo(() => {
     if (dateCtx.type === "samedi_milieu") return false;
@@ -1136,7 +1136,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
                   <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:4 }}>
                     {vacDates.map(d => {
                       const sel = addDatesOccasion.includes(d);
-                      const dn = JOURS_SEMAINE[new Date(d).getDay()];
+                      const dn = JOURS_SEMAINE[new Date(d + "T12:00:00").getDay()];
                       return (<label key={d} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"8px 10px", borderRadius:10, border:`2px solid ${sel?C.orange:C.border}`, background:sel?C.orange+"15":"transparent", cursor:"pointer", minWidth:52 }}>
                         <input type="checkbox" checked={sel} onChange={() => setAddDatesOccasion(prev => sel?prev.filter(x=>x!==d):[...prev,d])} style={{ accentColor:C.orange, width:16, height:16 }} />
                         <span style={{ fontSize:10, fontWeight:700, color:sel?C.orange:C.textMuted }}>{dn.substring(0,3)}</span>
@@ -1708,7 +1708,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
   // Une place libre est dispo en PERMANENTE et aussi en PROVISOIRE
   // Places provisoires SUPPLÉMENTAIRES = abonnés absents justifiés ce jour
   const getDispoSlot = useCallback((cr, dateStr) => {
-    const dow = new Date(dateStr).getDay();
+    const dow = new Date(dateStr + "T12:00:00").getDay();
     const dayName = JOURS_SEMAINE[dow];
     const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif);
     // Nb total inscrits (abonnés + occasionnels) pour affichage
@@ -1732,7 +1732,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
   // Slots applicables pour une date
   const getSlotsForDate = useCallback((dateStr) => {
     const ctx = getDateContext(dateStr);
-    const dow = new Date(dateStr).getDay();
+    const dow = new Date(dateStr + "T12:00:00").getDay();
     const dayName = JOURS_SEMAINE[dow];
     if (ctx.type === "samedi_milieu" || dow === 0) return [];
     let slots = [];
@@ -1759,7 +1759,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
   const semaineDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
   const semaineData = useMemo(() => semaineDates.map(dateStr => {
     const ctx = getDateContext(dateStr);
-    const dow = new Date(dateStr).getDay();
+    const dow = new Date(dateStr + "T12:00:00").getDay();
     const dayName = JOURS_SEMAINE[dow];
     const slots = getSlotsForDate(dateStr);
     const dispos = slots.map(cr => ({ ...cr, dispo: getDispoSlot(cr, dateStr) }));
@@ -1856,7 +1856,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
                     </div>
                   </div>
                 ))}
-                {day.ctx.type !== "samedi_milieu" && day.dispos.length === 0 && day.ctx.type !== "samedi_milieu" && new Date(day.dateStr).getDay() !== 0 && (
+                {day.ctx.type !== "samedi_milieu" && day.dispos.length === 0 && day.ctx.type !== "samedi_milieu" && new Date(day.dateStr + "T12:00:00").getDay() !== 0 && (
                   <div style={{ fontSize:10, color:C.textDim, textAlign:"center", padding:8 }}>—</div>
                 )}
               </div>
@@ -1868,7 +1868,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
       {/* ── VUE JOUR ── */}
       {viewMode === "jour" && (() => {
         const ctx = getDateContext(selectedDate);
-        const dow = new Date(selectedDate).getDay();
+        const dow = new Date(selectedDate + "T12:00:00").getDay();
         const dayName = JOURS_SEMAINE[dow];
         const ctxLabel = ctx.type==="vacances"?`🏕️ Stage ${ctx.vacance.label} — Semaine ${ctx.semaine}`:ctx.type==="samedi_milieu"?"😴 Milieu vacances":"📚 Période scolaire";
         const ctxColor = ctx.type==="vacances"?C.orange:ctx.type==="samedi_milieu"?C.textDim:C.accent;
