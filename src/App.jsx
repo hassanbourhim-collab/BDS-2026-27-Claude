@@ -870,12 +870,13 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     if (!addEleve || !inscriptionSlot) return;
     const slot = daySlots.find(s => s.id === inscriptionSlot.slotId);
     if (!slot) return;
-    const affData = { eleve_id: Number(addEleve), creneau_id: slot.id, type_inscription: addType, actif: true, date_debut: inscriptionSlot.dateStr };
-    const created = await api.post("affectations_creneaux", affData);
+    // POST sans date_debut (colonne optionnelle — migration Supabase peut ne pas être faite)
+    const created = await api.post("affectations_creneaux", { eleve_id: Number(addEleve), creneau_id: slot.id, type_inscription: addType, actif: true });
     if (!created) return;
-    if (addType === "occasionnel") {
-      await api.patch("affectations_creneaux", `eleve_id=eq.${addEleve}&creneau_id=eq.${slot.id}&actif=eq.true`, { dates_occasion: inscriptionSlot.dateStr });
-    }
+    // PATCH séparé pour les champs optionnels (échoue silencieusement si colonne absente)
+    const patches = { date_debut: inscriptionSlot.dateStr };
+    if (addType === "occasionnel") patches.dates_occasion = inscriptionSlot.dateStr;
+    await api.patch("affectations_creneaux", `eleve_id=eq.${addEleve}&creneau_id=eq.${slot.id}&actif=eq.true`, patches);
     setAddEleve("");
     setAddType("abonne");
     await refresh();
@@ -886,7 +887,9 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     if (st.type_inscription === "occasionnel") {
       await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { actif: false });
     } else {
-      await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { date_fin: dateStr });
+      // date_fin = dernier jour actif (colonne optionnelle) ; fallback actif=false si absent
+      const ok = await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { date_fin: dateStr });
+      if (!ok) await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { actif: false });
     }
     await refresh();
   };
