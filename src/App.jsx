@@ -270,6 +270,14 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
   const [addType, setAddType] = useState("abonne");
   const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
   const [addDatesOccasion, setAddDatesOccasion] = useState([]);
+  useEffect(() => {
+    if (open) {
+      setAddEleve("");
+      setAddType("abonne");
+      setAddJours(JOURS_STAGE.map(() => true));
+      setAddDatesOccasion([]);
+    }
+  }, [open, slot?.id]);
   if (!open || !slot) return null;
   const isStage = slot.type_creneau === "stage";
   const allAffs = affectations.filter(a => a.creneau_id === slot.id && a.actif);
@@ -289,7 +297,9 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
   const isFullForAbonne = !isStage && students.length >= slot.capacite && addType === "abonne";
   const needsDates = !isStage && addType === "occasionnel";
-  const canAdd = !isFullForAbonne && (isStage ? addJours.some(Boolean) : (!needsDates || addDatesOccasion.length > 0));
+  const canAdd = !isFullForAbonne && (isStage
+    ? JOURS_STAGE.some((_, i) => addJours[i] && jourCounts[i] < slot.capacite)
+    : (!needsDates || addDatesOccasion.length > 0));
 
   return (
     <Modal open={open} onClose={onClose} title={`${isStage?"Lun→Ven":slot.jour} ${(slot.heure_debut||"").substring(0,5)}-${(slot.heure_fin||"").substring(0,5)}`} wide>
@@ -350,7 +360,9 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
             <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
             {isFullForAbonne && <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"10px 14px", marginBottom:10, fontSize:13, fontWeight:700, color:C.danger }}>🚫 Complet pour un abonné ({students.length}/{slot.capacite}) — choisissez "Occasionnel" pour inscrire quand même</div>}
             {addType === "occasionnel" && (() => {
-              const nextDates = getNextOccurrences(slot.jour, todayStr(), 8);
+              const today = todayStr();
+              const todayIsSlotDay = new Date(today + "T12:00:00").getDay() === JOURS_SEMAINE.indexOf(slot.jour);
+              const nextDates = todayIsSlotDay ? [today, ...getNextOccurrences(slot.jour, today, 7)] : getNextOccurrences(slot.jour, today, 8);
               return (<div style={{ marginTop: 6, marginBottom: 6 }}>
                 <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Séances concernées <span style={{ color: C.warning }}>(cocher les dates)</span></div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
@@ -1139,7 +1151,8 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
             </>) : (<>
               <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
               {addType === "occasionnel" && (() => {
-                const nextDates = getNextOccurrences(addingTo.jour, selectedDate, 10);
+                const selIsSlotDay = new Date(selectedDate + "T12:00:00").getDay() === JOURS_SEMAINE.indexOf(addingTo.jour);
+                const nextDates = selIsSlotDay ? [selectedDate, ...getNextOccurrences(addingTo.jour, selectedDate, 9)] : getNextOccurrences(addingTo.jour, selectedDate, 10);
                 if (!nextDates.length) return null;
                 const abonnes = affectations.filter(a => a.creneau_id === addingTo.id && a.actif && a.type_inscription !== "occasionnel").length;
                 return (<div style={{ marginTop:12 }}>
