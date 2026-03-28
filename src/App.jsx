@@ -287,9 +287,9 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
     setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddDatesOccasion([]); refresh();
   };
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
-  const isRegularFull = !isStage && students.length >= slot.capacite;
+  const isFullForAbonne = !isStage && students.length >= slot.capacite && addType === "abonne";
   const needsDates = !isStage && addType === "occasionnel";
-  const canAdd = !isRegularFull && (isStage ? addJours.some(Boolean) : (!needsDates || addDatesOccasion.length > 0));
+  const canAdd = !isFullForAbonne && (isStage ? addJours.some(Boolean) : (!needsDates || addDatesOccasion.length > 0));
 
   return (
     <Modal open={open} onClose={onClose} title={`${isStage?"Lun→Ven":slot.jour} ${(slot.heure_debut||"").substring(0,5)}-${(slot.heure_fin||"").substring(0,5)}`} wide>
@@ -330,10 +330,7 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
 
       <div style={{ borderTop: `2px solid ${C.border}`, paddingTop: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Inscrire un élève</div>
-        {isRegularFull ? (
-          <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet ({students.length}/{slot.capacite} places)</div>
-        ) : (<>
-          <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif && !students.find(s => s.id === e.id)).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
+        <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif && !students.find(s => s.id === e.id)).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
           {isStage ? (
             <div>
               <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Jours de présence</div>
@@ -351,6 +348,7 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
             </div>
           ) : (<>
             <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
+            {isFullForAbonne && <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"10px 14px", marginBottom:10, fontSize:13, fontWeight:700, color:C.danger }}>🚫 Complet pour un abonné ({students.length}/{slot.capacite}) — choisissez "Occasionnel" pour inscrire quand même</div>}
             {addType === "occasionnel" && (() => {
               const nextDates = getNextOccurrences(slot.jour, todayStr(), 8);
               return (<div style={{ marginTop: 6, marginBottom: 6 }}>
@@ -371,7 +369,6 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <Btn onClick={addStudent} disabled={!addEleve || !canAdd} color={C.success}>+ Inscrire</Btn>
           </div>
-        </>)}
       </div>
     </Modal>
   );
