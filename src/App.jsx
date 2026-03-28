@@ -868,17 +868,24 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
 
   const inscribeInManageModal = async () => {
     if (!addEleve || !inscriptionSlot) return;
-    const slot = daySlots.find(s => s.id === inscriptionSlot.slotId);
-    if (!slot) return;
-    // POST sans date_debut (colonne optionnelle — migration Supabase peut ne pas être faite)
-    const created = await api.post("affectations_creneaux", { eleve_id: Number(addEleve), creneau_id: slot.id, type_inscription: addType, actif: true });
-    if (!created) return;
+    const slotId = inscriptionSlot.slotId;
+    const eleveId = Number(addEleve);
+    // Tenter de réactiver une ligne inactive existante (évite les erreurs de contrainte unique)
+    const reactivated = await api.patch("affectations_creneaux",
+      `eleve_id=eq.${eleveId}&creneau_id=eq.${slotId}&actif=eq.false`,
+      { actif: true, type_inscription: addType });
+    if (!reactivated || reactivated.length === 0) {
+      // Aucune ligne inactive — créer une nouvelle inscription
+      const created = await api.post("affectations_creneaux", { eleve_id: eleveId, creneau_id: slotId, type_inscription: addType, actif: true });
+      if (!created) return;
+    }
     // PATCH séparé pour les champs optionnels (échoue silencieusement si colonne absente)
     const patches = { date_debut: inscriptionSlot.dateStr };
     if (addType === "occasionnel") patches.dates_occasion = inscriptionSlot.dateStr;
-    await api.patch("affectations_creneaux", `eleve_id=eq.${addEleve}&creneau_id=eq.${slot.id}&actif=eq.true`, patches);
+    await api.patch("affectations_creneaux", `eleve_id=eq.${eleveId}&creneau_id=eq.${slotId}&actif=eq.true`, patches);
     setAddEleve("");
     setAddType("abonne");
+    setInscriptionSlot(null);
     await refresh();
     await loadPresences();
   };
@@ -1122,139 +1129,6 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
           </div>);
         })()}
       </Modal>
-
-      {/* ANCIEN BLOC SUPPRIMÉ — conservé pour compatibilité : false */}
-      {false && <Modal open={!!addingTo} onClose={resetAddModal} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
-        {addingTo && (() => {
-          const isStageSlot = addingTo.type_creneau === "stage";
-          const totalInscrits = affectations.filter(a => a.creneau_id === addingTo.id && a.actif).length;
-          const isRegularFull = totalInscrits >= addingTo.capacite && addType === "abonne";
-          const dur = slotDur(addingTo);
-          const nbHours = Math.floor(dur);
-          const startH = parseInt((addingTo.heure_debut||"00:00").split(":")[0]);
-          const needsDates = addType === "occasionnel";
-          const canSubmit = !isRegularFull && (showNewEleve ? (newEleveData.prenom && newEleveData.nom) : (addEleve && (!needsDates || addDatesOccasion.length > 0)));
-          return (<div>
-            {isRegularFull && <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", marginBottom:14, textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet pour un abonné ({totalInscrits}/{addingTo.capacite} places) — inscription occasionnelle possible</div>}
-            {/* Tabs élève existant / nouvel élève */}
-            <div style={{ display:"flex", gap:4, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}`, marginBottom:16 }}>
-              <button onClick={() => setShowNewEleve(false)} style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"none", cursor:"pointer", background:!showNewEleve?C.accent:"transparent", color:!showNewEleve?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>👤 Élève existant</button>
-              <button onClick={() => setShowNewEleve(true)} style={{ flex:1, padding:"8px 12px", borderRadius:8, border:"none", cursor:"pointer", background:showNewEleve?C.accent:"transparent", color:showNewEleve?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>➕ Nouvel élève</button>
-            </div>
-            {showNewEleve ? (
-              <div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-                  <div>
-                    <div style={{ fontSize:12, color:C.textMuted, marginBottom:4, fontWeight:600 }}>Prénom *</div>
-                    <input value={newEleveData.prenom} onChange={e => setNewEleveData(p => ({...p, prenom:e.target.value}))} placeholder="Prénom" style={{ width:"100%", padding:"10px 12px", background:C.surfaceLight, border:`2px solid ${C.border}`, borderRadius:8, color:C.text, fontSize:14, boxSizing:"border-box" }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize:12, color:C.textMuted, marginBottom:4, fontWeight:600 }}>Nom *</div>
-                    <input value={newEleveData.nom} onChange={e => setNewEleveData(p => ({...p, nom:e.target.value}))} placeholder="Nom" style={{ width:"100%", padding:"10px 12px", background:C.surfaceLight, border:`2px solid ${C.border}`, borderRadius:8, color:C.text, fontSize:14, boxSizing:"border-box" }} />
-                  </div>
-                </div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:10 }}>
-                  <Input label="Classe" value={newEleveData.classe} onChange={v => setNewEleveData(p => ({...p, classe:v}))} options={CLASSES.map(c => [c,c])} />
-                  <Input label="Forfait" value={newEleveData.forfait} onChange={v => setNewEleveData(p => ({...p, forfait:v}))} options={Object.entries(FORFAITS).map(([k,f]) => [k, f.l])} />
-                </div>
-                <div style={{ marginTop:10 }}>
-                  <div style={{ fontSize:12, color:C.textMuted, marginBottom:4, fontWeight:600 }}>Nom parent</div>
-                  <input value={newEleveData.nom_parent1} onChange={e => setNewEleveData(p => ({...p, nom_parent1:e.target.value}))} placeholder="Nom du parent" style={{ width:"100%", padding:"10px 12px", background:C.surfaceLight, border:`2px solid ${C.border}`, borderRadius:8, color:C.text, fontSize:14, boxSizing:"border-box" }} />
-                </div>
-                <div style={{ marginTop:10 }}>
-                  <div style={{ fontSize:12, color:C.textMuted, marginBottom:4, fontWeight:600 }}>Tél parent</div>
-                  <input value={newEleveData.tel_parent1} onChange={e => setNewEleveData(p => ({...p, tel_parent1:e.target.value}))} placeholder="+33600000000" style={{ width:"100%", padding:"10px 12px", background:C.surfaceLight, border:`2px solid ${C.border}`, borderRadius:8, color:C.text, fontSize:14, boxSizing:"border-box" }} />
-                </div>
-              </div>
-            ) : (
-              <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
-            )}
-            {isStageSlot ? (<>
-              <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Toute la semaine (abonné)"],["occasionnel","⚡ Jours spécifiques"]]} />
-              {addType === "occasionnel" && (() => {
-                const vacDates = getVacationWeekDates(addingTo.periode_vacances, addingTo.semaine_vacances || 1);
-                if (!vacDates.length) return null;
-                return (<div style={{ marginBottom:14 }}>
-                  <div style={{ fontSize:12, color:C.textMuted, marginBottom:8, fontWeight:700 }}>Jours de stage <span style={{ color:C.orange }}>(cocher les dates)</span></div>
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:4 }}>
-                    {vacDates.map(d => {
-                      const sel = addDatesOccasion.includes(d);
-                      const dn = JOURS_SEMAINE[new Date(d + "T12:00:00").getDay()];
-                      return (<label key={d} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"8px 10px", borderRadius:10, border:`2px solid ${sel?C.orange:C.border}`, background:sel?C.orange+"15":"transparent", cursor:"pointer", minWidth:52 }}>
-                        <input type="checkbox" checked={sel} onChange={() => setAddDatesOccasion(prev => sel?prev.filter(x=>x!==d):[...prev,d])} style={{ accentColor:C.orange, width:16, height:16 }} />
-                        <span style={{ fontSize:10, fontWeight:700, color:sel?C.orange:C.textMuted }}>{dn.substring(0,3)}</span>
-                        <span style={{ fontSize:11, fontWeight:700, color:sel?C.orange:C.text }}>{fmtDateFr(d)}</span>
-                      </label>);
-                    })}
-                  </div>
-                  <div style={{ fontSize:11, color:C.textDim }}>{addDatesOccasion.length} jour{addDatesOccasion.length>1?"s":""} sélectionné{addDatesOccasion.length>1?"s":""}</div>
-                </div>);
-              })()}
-              {addType === "abonne" && <div style={{ background:C.orange+"12", border:`1px solid ${C.orange}33`, borderRadius:8, padding:"8px 12px", marginBottom:14, fontSize:12, color:C.orange }}>🏕️ Présent tous les jours de la semaine de stage (Lun → Ven)</div>}
-            </>) : (<>
-              <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
-              {addType === "occasionnel" && (() => {
-                const selIsSlotDay = new Date(selectedDate + "T12:00:00").getDay() === JOURS_SEMAINE.indexOf(addingTo.jour);
-                const nextDates = selIsSlotDay ? [selectedDate, ...getNextOccurrences(addingTo.jour, selectedDate, 9)] : getNextOccurrences(addingTo.jour, selectedDate, 10);
-                if (!nextDates.length) return null;
-                const abonnes = affectations.filter(a => a.creneau_id === addingTo.id && a.actif && a.type_inscription !== "occasionnel").length;
-                return (<div style={{ marginTop:12 }}>
-                  <div style={{ fontSize:12, color:C.textMuted, marginBottom:8, fontWeight:700 }}>Dates de présence <span style={{ color:C.purple }}>(cocher les séances souhaitées)</span></div>
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:4 }}>
-                    {nextDates.map(d => {
-                      const sel = addDatesOccasion.includes(d);
-                      const occOnDate = affectations.filter(a => a.creneau_id === addingTo.id && a.actif && a.type_inscription === "occasionnel" && a.dates_occasion && a.dates_occasion.split(",").includes(d)).length;
-                      const totalOnDate = abonnes + occOnDate + (sel ? 1 : 0);
-                      const willFull = totalOnDate >= addingTo.capacite;
-                      return (<label key={d} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:3, padding:"8px 10px", borderRadius:10, border:`2px solid ${sel ? C.purple : C.border}`, background: sel ? C.purple+"15" : "transparent", cursor:"pointer", minWidth:58 }}>
-                        <input type="checkbox" checked={sel} onChange={() => setAddDatesOccasion(prev => sel ? prev.filter(x => x !== d) : [...prev, d])} style={{ accentColor:C.purple, width:16, height:16 }} />
-                        <span style={{ fontSize:12, fontWeight:700, color:sel ? C.purple : C.text }}>{fmtDateFr(d)}</span>
-                        {willFull && <span style={{ fontSize:9, color:C.danger, fontWeight:700 }}>Complet</span>}
-                      </label>);
-                    })}
-                  </div>
-                  <div style={{ fontSize:11, color:C.textDim, marginTop:4 }}>{addDatesOccasion.length} date{addDatesOccasion.length>1?"s":""} sélectionnée{addDatesOccasion.length>1?"s":""}</div>
-                </div>);
-              })()}
-              {addType === "abonne" && (() => {
-                const abonnesCount = affectations.filter(a => a.creneau_id === addingTo.id && a.actif && a.type_inscription !== "occasionnel").length;
-                const datesMap = {};
-                affectations.filter(a => a.creneau_id === addingTo.id && a.actif && a.type_inscription === "occasionnel" && a.dates_occasion)
-                  .forEach(a => a.dates_occasion.split(",").forEach(d => { datesMap[d] = (datesMap[d]||0) + 1; }));
-                const conflictDates = Object.entries(datesMap).filter(([,cnt]) => abonnesCount + 1 + cnt > addingTo.capacite).map(([d]) => d).sort();
-                return conflictDates.length > 0 ? (
-                  <div style={{ background:C.warning+"15", border:`2px solid ${C.warning}44`, borderRadius:10, padding:"10px 14px", marginTop:10, fontSize:12, color:C.warning, fontWeight:700 }}>
-                    ⚠️ Ce créneau sera <b>complet</b> les {conflictDates.map(fmtDateFr).join(", ")} à cause d'élèves occasionnels
-                  </div>
-                ) : null;
-              })()}
-            </>)}
-            {nbHours >= 2 ? (
-              <div style={{ marginTop:12, marginBottom:6 }}>
-                <div style={{ fontSize:12, color:C.textMuted, marginBottom:8, fontWeight:700 }}>Heures suivies</div>
-                <div style={{ display:"flex", gap:8 }}>
-                  {Array.from({length:nbHours}, (_,i) => {
-                    const checked = addHoursChecks.length > 0 ? addHoursChecks[i] !== false : true;
-                    const label = `${startH+i}h–${startH+i+1}h`;
-                    return (<label key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, padding:"10px 6px", borderRadius:10, border:`2px solid ${checked ? C.accent : C.border}`, background:checked ? C.accent+"15" : "transparent", cursor:"pointer" }}>
-                      <input type="checkbox" checked={checked} onChange={() => {
-                        const nc = addHoursChecks.length > 0 ? [...addHoursChecks] : Array(nbHours).fill(true);
-                        nc[i] = !nc[i];
-                        setAddHoursChecks(nc);
-                      }} style={{ accentColor:C.accent, width:18, height:18 }} />
-                      <span style={{ fontSize:12, fontWeight:700, color:checked ? C.accent : C.textMuted }}>{label}</span>
-                    </label>);
-                  })}
-                </div>
-              </div>
-            ) : null}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
-              <Btn onClick={resetAddModal} color={C.textMuted} outline>Annuler</Btn>
-              <Btn onClick={showNewEleve ? addNewEleveAndInscribe : addOcc} disabled={!canSubmit}>Ajouter</Btn>
-            </div>
-          </div>);
-        })()}
-      </Modal>}
 
       <ValidationSeanceModal
         open={!!validatingSlot}
