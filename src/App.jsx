@@ -518,7 +518,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
 };
 
 // ═══ VUE SEMAINE (style Pronote) ═══
-const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick, onWeekChange }) => {
+const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick, onWeekChange, onSlotClick }) => {
   const weekDates = useMemo(() => getWeekDates(baseDate), [baseDate]);
   const today = todayStr();
 
@@ -539,13 +539,17 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick, onW
       // Count students expected on this specific date (handles abonné, occasionnel, old jours_stage)
       const inscribed = ctx.type === "vacances"
         ? aff.filter(a => {
-            if (a.jours_stage) return a.jours_stage.includes(dayName); // rétro-compat ancien système
+            if (a.date_debut && a.date_debut > dateStr) return false;
+            if (a.date_fin && a.date_fin < dateStr) return false;
+            if (a.jours_stage) return a.jours_stage.includes(dayName);
             if (a.type_inscription === "occasionnel" && a.dates_occasion) return a.dates_occasion.split(",").includes(dateStr);
-            return true; // abonné ou stage sans restriction = toute la semaine
+            return true;
           }).length
         : aff.filter(a => {
+            if (a.date_debut && a.date_debut > dateStr) return false;
+            if (a.date_fin && a.date_fin < dateStr) return false;
             if (a.type_inscription === "occasionnel" && a.dates_occasion) return a.dates_occasion.split(",").includes(dateStr);
-            return true; // abonné = toujours présent
+            return true;
           }).length;
       const dayPres = presences.filter(p => p.date_cours === dateStr && p.creneau_id === cr.id);
       const absJust = dayPres.filter(p => p.statut === "absent_justifie").length;
@@ -620,7 +624,7 @@ const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick, onW
               day.slots.map(slot => (
                 <div
                   key={slot.id}
-                  onClick={() => onDayClick(day.dateStr)}
+                  onClick={() => onSlotClick ? onSlotClick(slot, day.dateStr) : onDayClick(day.dateStr)}
                   style={{ background: slot.appelFait ? C.blue+"15" : slot.fillColor+"15",
                     border: `2px solid ${slot.appelFait ? C.blue+"66" : slot.fillColor+"55"}`,
                     borderLeft: `4px solid ${slot.appelFait ? C.blue : slot.fillColor}`,
@@ -810,25 +814,12 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const [viewMode, setViewMode] = useState("week"); // "week" | "day"
   const [localPresences, setLocalPresences] = useState([]);
   const [saving, setSaving] = useState(false);
-  const [addingTo, setAddingTo] = useState(null);
+  const [inscriptionSlot, setInscriptionSlot] = useState(null); // { slotId, dateStr }
   const [addEleve, setAddEleve] = useState("");
   const [addType, setAddType] = useState("abonne");
-  const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
-  const [addHeuresDef, setAddHeuresDef] = useState(null); // durée par défaut pour cet élève
-  const [showNewEleve, setShowNewEleve] = useState(false);
-  const [newEleveData, setNewEleveData] = useState({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" });
-  const [addHoursChecks, setAddHoursChecks] = useState([]); // per-hour checkboxes for slots ≥ 2h
-  const [addDatesOccasion, setAddDatesOccasion] = useState([]); // dates sélectionnées pour occasionnel
-  const [inscriptionSuccess, setInscriptionSuccess] = useState(null); // message after successful inscription
-  const [slotDetail, setSlotDetail] = useState(null);
   const [arretModal, setArretModal] = useState(null); // { st, slot }
   const [validatingSlot, setValidatingSlot] = useState(null); // slot with students
 
-  const addingJourCounts = useMemo(() => {
-    if (!addingTo || addingTo.type_creneau !== "stage") return [];
-    const affs = affectations.filter(a => a.creneau_id === addingTo.id && a.actif);
-    return JOURS_STAGE.map(j => affs.filter(a => !a.jours_stage || a.jours_stage.includes(j)).length);
-  }, [addingTo, affectations]);
 
   const dayName = useMemo(() => JOURS_SEMAINE[new Date(selectedDate + "T12:00:00").getDay()], [selectedDate]);
   const dateCtx = useMemo(() => getDateContext(selectedDate), [selectedDate]);
@@ -853,6 +844,8 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
     return rel.map(cr => {
       const assigned = affectations.filter(a => a.creneau_id === cr.id && a.actif);
       const students = assigned.map(a => {
+        if (a.date_debut && a.date_debut > selectedDate) return null;
+        if (a.date_fin && a.date_fin < selectedDate) return null;
         if (cr.type_creneau === "stage" && a.jours_stage && !a.jours_stage.includes(dayName)) return null;
         if (a.type_inscription === "occasionnel" && a.dates_occasion && !a.dates_occasion.split(",").includes(selectedDate)) return null;
         const el = eleves.find(e => e.id === a.eleve_id); const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id); return el ? { ...el, type_inscription: a.type_inscription, presence: pres, affectation_id: a.id, jours_stage: a.jours_stage, heures_defaut: a.heures_defaut || null, dates_occasion: a.dates_occasion || null } : null;
@@ -867,40 +860,35 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
   const markAllPresent = async (slot) => { setSaving(true); for (const st of slot.students) { if (!st.presence) await api.post("presences", { eleve_id: st.id, date_cours: selectedDate, creneau_id: slot.id, statut: "present", heures: st.heures_defaut || slot.dur }); } await loadPresences(); setSaving(false); };
   const adjustDuration = async (pid, newH) => { if (newH < 0.5) return; await api.patch("presences", `id=eq.${pid}`, { heures: newH }); await loadPresences(); };
   const handleArretDefinitif = async (eleveId, creneauId) => { await api.patch("affectations_creneaux", `eleve_id=eq.${eleveId}&creneau_id=eq.${creneauId}&actif=eq.true`, { actif: false }); setArretModal(null); refresh(); };
-  const addOcc = async () => {
-    if (!addEleve || !addingTo) return;
-    const affData = { eleve_id: addEleve, creneau_id: addingTo.id, type_inscription: addType, actif: true, jours_stage: null };
-    const checkedCount = addHoursChecks.filter(Boolean).length;
-    if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
-    else if (addHeuresDef) affData.heures_defaut = addHeuresDef;
-    const datesOcc = addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
+  const openInscriptionSlot = useCallback((slot, dateStr) => {
+    setInscriptionSlot({ slotId: slot.id, dateStr });
+    setAddEleve("");
+    setAddType("abonne");
+  }, []);
+
+  const inscribeInManageModal = async () => {
+    if (!addEleve || !inscriptionSlot) return;
+    const slot = daySlots.find(s => s.id === inscriptionSlot.slotId);
+    if (!slot) return;
+    const affData = { eleve_id: Number(addEleve), creneau_id: slot.id, type_inscription: addType, actif: true, date_debut: inscriptionSlot.dateStr };
     const created = await api.post("affectations_creneaux", affData);
     if (!created) return;
-    if (datesOcc) await api.patch("affectations_creneaux", `eleve_id=eq.${addEleve}&creneau_id=eq.${addingTo.id}&actif=eq.true`, { dates_occasion: datesOcc });
+    if (addType === "occasionnel") {
+      await api.patch("affectations_creneaux", `eleve_id=eq.${addEleve}&creneau_id=eq.${slot.id}&actif=eq.true`, { dates_occasion: inscriptionSlot.dateStr });
+    }
+    setAddEleve("");
+    setAddType("abonne");
     await refresh();
-    const firstDate = datesOcc?.split(",")[0];
-    if (datesOcc) setInscriptionSuccess({ dates: datesOcc.split(","), firstDate });
-    if (firstDate && firstDate !== selectedDate) setSelectedDate(firstDate);
-    setAddingTo(null); setAddEleve(""); setAddType("abonne"); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]);
+    await loadPresences();
   };
-  const resetAddModal = () => { setAddingTo(null); setAddEleve(""); setAddType("abonne"); setAddJours(JOURS_STAGE.map(() => true)); setAddHeuresDef(null); setAddHoursChecks([]); setAddDatesOccasion([]); setShowNewEleve(false); setNewEleveData({ prenom:"", nom:"", classe:"6ème", forfait:"groupe", nom_parent1:"", tel_parent1:"" }); setInscriptionSuccess(null); };
-  const addNewEleveAndInscribe = async () => {
-    if (!newEleveData.prenom || !newEleveData.nom || !addingTo) return;
-    const created = await api.post("eleves", { ...newEleveData, actif: true });
-    const newId = Array.isArray(created) ? created[0]?.id : created?.id;
-    if (!newId) return;
-    const affData = { eleve_id: newId, creneau_id: addingTo.id, type_inscription: addType, actif: true, jours_stage: null };
-    const checkedCount = addHoursChecks.filter(Boolean).length;
-    if (addHoursChecks.length > 0 && checkedCount < addHoursChecks.length) affData.heures_defaut = checkedCount;
-    const datesOcc = addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
-    const createdAff = await api.post("affectations_creneaux", affData);
-    if (!createdAff) return;
-    if (datesOcc) await api.patch("affectations_creneaux", `eleve_id=eq.${newId}&creneau_id=eq.${addingTo.id}&actif=eq.true`, { dates_occasion: datesOcc });
+
+  const handleRetirer = async (st, dateStr) => {
+    if (st.type_inscription === "occasionnel") {
+      await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { actif: false });
+    } else {
+      await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { date_fin: dateStr });
+    }
     await refresh();
-    const firstDate = datesOcc?.split(",")[0];
-    if (datesOcc) setInscriptionSuccess({ dates: datesOcc.split(","), firstDate });
-    if (firstDate && firstDate !== selectedDate) setSelectedDate(firstDate);
-    resetAddModal();
   };
 
   const stats = useMemo(() => { let t=0,p=0,a=0,pe=0; daySlots.forEach(s => s.students.forEach(st => { t++; if(st.presence){st.presence.statut==="present"?p++:a++;}else pe++; })); return { t,p,a,pe }; }, [daySlots]);
@@ -933,16 +921,6 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
         {saving && <span style={{ fontSize:13, color:C.warning }}>⏳ Enregistrement...</span>}
       </div>
 
-      {/* Bandeau succès inscription occasionnelle */}
-      {inscriptionSuccess && (
-        <div style={{ background: C.success+"15", border: `2px solid ${C.success}55`, borderRadius: 12, padding: "12px 16px", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 14, color: C.success, fontWeight: 700 }}>
-            ✓ Élève inscrit pour {inscriptionSuccess.dates.length} séance{inscriptionSuccess.dates.length > 1 ? "s" : ""} — affiché le {fmtDateFr(inscriptionSuccess.firstDate)} (vue déplacée à cette date)
-          </span>
-          <button onClick={() => setInscriptionSuccess(null)} style={{ background: "none", border: "none", cursor: "pointer", color: C.success, fontSize: 18, fontWeight: 700 }}>×</button>
-        </div>
-      )}
-
       {/* Vue Semaine */}
       {viewMode === "week" && (
         <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:16, padding:20, boxShadow:"0 2px 8px rgba(0,0,0,0.04)", marginBottom:20 }}>
@@ -953,6 +931,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
             baseDate={selectedDate}
             onDayClick={(date) => { setSelectedDate(date); setViewMode("day"); }}
             onWeekChange={(date) => setSelectedDate(date)}
+            onSlotClick={(slot, date) => { setSelectedDate(date); setViewMode("day"); openInscriptionSlot(slot, date); }}
           />
         </div>
       )}
@@ -985,22 +964,22 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
             const allDone = slot.students.length > 0 && slot.students.every(st => st.presence);
             const tarif = tarifMode(slot.mode);
             const absJustifies = slot.students.filter(st => st.presence?.statut === "absent_justifie").length;
-            const placesProvisoires = absJustifies;
-            const placesLibres = slot.capacite - slot.students.filter(st => st.type_inscription !== "occasionnel").length;
+            const effectiveCount = slot.students.length - absJustifies;
+            const placesLibres = Math.max(0, slot.capacite - effectiveCount);
             return (
                 <div key={slot.id} style={{ background: C.surface, border: `2px solid ${allDone?C.success:C.border}`, borderRadius: 16, padding: 18, borderLeft: `5px solid ${allDone?C.success:dateCtx.type==="vacances"?C.orange:C.accent}`, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap:"wrap", gap:8 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap:"wrap" }}>
                       <span style={{ fontWeight: 800, fontSize: 18, color: C.text }}>{(slot.heure_debut||"").substring(0,5)} — {(slot.heure_fin||"").substring(0,5)}</span>
                       <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarif}€/h</Badge>
-                      <Badge color={C.textMuted}>{slot.students.length}/{slot.capacite}</Badge>
+                      <Badge color={C.textMuted}>{effectiveCount}/{slot.capacite}</Badge>
                       {slot.type_creneau==="stage" && <Badge color={C.orange}>🏖️ Vacances S{slot.semaine_vacances} · {dayName}</Badge>}
-                      {placesProvisoires > 0 && <Badge color={C.warning}>💬 {placesProvisoires} place{placesProvisoires>1?"s":""} provisoire{placesProvisoires>1?"s":""}</Badge>}
-                      {placesLibres > 0 && slot.students.length < slot.capacite && !placesProvisoires && <Badge color={C.success}>🟢 {placesLibres} place{placesLibres>1?"s":""} libre{placesLibres>1?"s":""}</Badge>}
+                      {absJustifies > 0 && <Badge color={C.warning}>💬 {absJustifies} absent{absJustifies>1?"s":""} prévenu{absJustifies>1?"s":""}</Badge>}
+                      {placesLibres > 0 && <Badge color={C.success}>🟢 {placesLibres} place{placesLibres>1?"s":""} libre{placesLibres>1?"s":""}</Badge>}
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       {!allDone && slot.students.length > 0 && <Btn small color={C.success} onClick={() => markAllPresent(slot)} title="Tous présents">✓ Tous</Btn>}
-                      {slot.students.length < slot.capacite && <Btn small color={C.purple} outline onClick={() => { setAddingTo(slot); setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); }}>+ Élève</Btn>}
+                      {effectiveCount < slot.capacite && <Btn small color={C.purple} outline onClick={() => openInscriptionSlot(slot, selectedDate)}>+ Élève</Btn>}
                       {allDone && slot.students.length > 0 && (
                         <Btn small color={C.success} onClick={() => setValidatingSlot({ ...slot })} title="Valider la séance et générer la facturation">
                           💶 Valider & Facturer
@@ -1073,7 +1052,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
                         </div>);
                     })}
                   </div>
-                  {slot.students.length === 0 && <div style={{ textAlign: "center", padding: 20, color: C.textDim, fontSize: 13 }}>Créneau vide — ajoutez des élèves depuis la page Créneaux ou cliquez + Élève</div>}
+                  {slot.students.length === 0 && <div style={{ textAlign: "center", padding: 20, color: C.textDim, fontSize: 13 }}>Créneau vide — cliquez + Élève pour inscrire</div>}
                 </div>
             );
           })}
@@ -1081,7 +1060,68 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
       )}
       </>}
 
-      <Modal open={!!addingTo} onClose={resetAddModal} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
+      {/* ── Modal gestion inscription ── */}
+      <Modal open={!!inscriptionSlot} onClose={() => { setInscriptionSlot(null); setAddEleve(""); setAddType("abonne"); }} title={(() => { const s = inscriptionSlot ? daySlots.find(x => x.id === inscriptionSlot.slotId) : null; return s ? `${s.jour||"Lun→Ven"} ${(s.heure_debut||"").substring(0,5)}–${(s.heure_fin||"").substring(0,5)} — ${fmtDateFr(inscriptionSlot.dateStr)}` : "Gestion inscription"; })()}>
+        {inscriptionSlot && (() => {
+          const slot = daySlots.find(s => s.id === inscriptionSlot.slotId);
+          if (!slot) return <div style={{ color:C.textDim, padding:20, textAlign:"center" }}>Créneau introuvable pour cette date.</div>;
+          const effCount = slot.students.filter(st => st.presence?.statut !== "absent_justifie").length;
+          const isFull = effCount >= slot.capacite;
+          const alreadyIds = slot.students.map(s => s.id);
+          const availableEleves = eleves.filter(e => e.actif && !alreadyIds.includes(e.id));
+          return (<div>
+            {/* Section inscrits */}
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:C.textMuted, marginBottom:10, textTransform:"uppercase" }}>Inscrits ce jour — {effCount}/{slot.capacite}</div>
+              {slot.students.length === 0
+                ? <div style={{ color:C.textDim, fontSize:13, padding:"16px 0", textAlign:"center" }}>Aucun élève inscrit</div>
+                : slot.students.map(st => {
+                    const hasP = !!st.presence;
+                    const isAJ = st.presence?.statut === "absent_justifie";
+                    return (
+                      <div key={st.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", borderRadius:10, background:isAJ?C.warning+"12":C.surfaceLight, border:`1px solid ${isAJ?C.warning+"44":C.border}`, marginBottom:6 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                          <span style={{ fontWeight:700, fontSize:14, color:C.text }}>{st.prenom} {st.nom}</span>
+                          <Badge color={C.purple}>{st.classe}</Badge>
+                          {st.type_inscription==="occasionnel" && <Badge color={C.warning}>⚡ Occ.</Badge>}
+                          {isAJ && <Badge color={C.warning}>🏥 Absent ce jour</Badge>}
+                          {st.presence?.statut==="present" && <Badge color={C.success}>✓ Présent</Badge>}
+                          {st.presence?.statut==="absent_non_justifie" && <Badge color={C.danger}>✗ Non prévenu</Badge>}
+                        </div>
+                        <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                          {!hasP && st.type_inscription!=="occasionnel" && (
+                            <button onClick={() => markAbsent(st.id, slot.id, "absent_justifie")} style={{ background:C.warning+"15", border:`1px solid ${C.warning}44`, color:C.warning, cursor:"pointer", fontSize:11, padding:"4px 10px", borderRadius:6, fontWeight:700 }}>📅 Absent ce jour</button>
+                          )}
+                          {!hasP && (
+                            <button onClick={() => handleRetirer(st, inscriptionSlot.dateStr)} style={{ background:C.danger+"15", border:"none", color:C.danger, cursor:"pointer", fontSize:11, padding:"4px 10px", borderRadius:6, fontWeight:700 }}>🚪 Retirer</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+            </div>
+            {/* Section inscription */}
+            <div style={{ borderTop:`2px solid ${C.border}`, paddingTop:16 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:C.textMuted, marginBottom:12, textTransform:"uppercase" }}>Inscrire un élève</div>
+              {isFull
+                ? <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet ({effCount}/{slot.capacite} places)</div>
+                : (<>
+                    <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"],...availableEleves.sort((a,b)=>a.nom.localeCompare(b.nom)).map(e=>[e.id,`${e.prenom} ${e.nom} (${e.classe})`])]} />
+                    <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné (toutes les semaines suivantes)"],["occasionnel","⚡ Occasionnel (cette séance uniquement)"]]} />
+                    <div style={{ background:addType==="abonne"?C.accent+"12":C.warning+"12", border:`1px solid ${addType==="abonne"?C.accent:C.warning}33`, borderRadius:8, padding:"8px 12px", marginBottom:14, fontSize:12, color:addType==="abonne"?C.accent:C.warning }}>
+                      {addType==="abonne" ? `✓ Inscrit à partir du ${fmtDateFr(inscriptionSlot.dateStr)}, chaque semaine` : `⚡ Inscrit uniquement pour la séance du ${fmtDateFr(inscriptionSlot.dateStr)}`}
+                    </div>
+                    <div style={{ display:"flex", justifyContent:"flex-end" }}>
+                      <Btn onClick={inscribeInManageModal} disabled={!addEleve} color={C.success}>+ Inscrire</Btn>
+                    </div>
+                  </>)}
+            </div>
+          </div>);
+        })()}
+      </Modal>
+
+      {/* ANCIEN BLOC SUPPRIMÉ — conservé pour compatibilité : false */}
+      {false && <Modal open={!!addingTo} onClose={resetAddModal} title={`Ajouter à ${(addingTo?.heure_debut||"").substring(0,5)}-${(addingTo?.heure_fin||"").substring(0,5)}`}>
         {addingTo && (() => {
           const isStageSlot = addingTo.type_creneau === "stage";
           const totalInscrits = affectations.filter(a => a.creneau_id === addingTo.id && a.actif).length;
@@ -1211,8 +1251,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
             </div>
           </div>);
         })()}
-      </Modal>
-      <SlotDetailModal open={!!slotDetail} onClose={() => setSlotDetail(null)} slot={slotDetail} eleves={eleves} affectations={affectations} refresh={() => { refresh(); loadPresences(); }} />
+      </Modal>}
 
       <ValidationSeanceModal
         open={!!validatingSlot}
@@ -1398,30 +1437,29 @@ const CreneauxPage = ({ creneaux, affectations, eleves, refresh }) => {
   const [tab, setTab] = useState("regulier");
   const [editCr, setEditCr] = useState(null);
   const [newOpen, setNewOpen] = useState(false);
-  const [slotDetail, setSlotDetail] = useState(null);
 
   const reguliers = creneaux.filter(cr => (cr.type_creneau||"regulier")==="regulier");
   const stages = creneaux.filter(cr => cr.type_creneau==="stage");
 
   const daysReg = useMemo(() => [...new Set(reguliers.map(cr => cr.jour))].sort((a,b) => JOURS_ALL.indexOf(a)-JOURS_ALL.indexOf(b)), [reguliers]);
-  const groupedReg = useMemo(() => { const g = {}; daysReg.forEach(d => g[d]=[]); reguliers.forEach(cr => { if(g[cr.jour]) { const sts = affectations.filter(a => a.creneau_id===cr.id && a.actif).map(a => { const el = eleves.find(e => e.id===a.eleve_id); return el?{...el,type_inscription:a.type_inscription,affectation_id:a.id}:null; }).filter(Boolean); g[cr.jour].push({...cr,students:sts}); } }); return g; }, [reguliers, affectations, eleves, daysReg]);
+  const groupedReg = useMemo(() => { const g = {}; daysReg.forEach(d => g[d]=[]); reguliers.forEach(cr => { if(g[cr.jour]) { const studentCount = affectations.filter(a => a.creneau_id===cr.id && a.actif).length; g[cr.jour].push({...cr,studentCount}); } }); return g; }, [reguliers, affectations, daysReg]);
 
-  const groupedStage = useMemo(() => { const g = {}; stages.forEach(cr => { const pk = `${cr.periode_vacances}_S${cr.semaine_vacances||1}`; if(!g[pk]) g[pk] = { periode: cr.periode_vacances, semaine: cr.semaine_vacances||1, slots: [] }; const sts = affectations.filter(a => a.creneau_id===cr.id && a.actif).map(a => { const el = eleves.find(e => e.id===a.eleve_id); return el?{...el,type_inscription:a.type_inscription,affectation_id:a.id}:null; }).filter(Boolean); g[pk].slots.push({...cr,students:sts}); }); return g; }, [stages, affectations, eleves]);
+  const groupedStage = useMemo(() => { const g = {}; stages.forEach(cr => { const pk = `${cr.periode_vacances}_S${cr.semaine_vacances||1}`; if(!g[pk]) g[pk] = { periode: cr.periode_vacances, semaine: cr.semaine_vacances||1, slots: [] }; const studentCount = affectations.filter(a => a.creneau_id===cr.id && a.actif).length; g[pk].slots.push({...cr,studentCount}); }); return g; }, [stages, affectations]);
 
   const deleteCreneau = async (crId) => { if(confirm("Supprimer ce créneau ?")) { await api.del("affectations_creneaux",`creneau_id=eq.${crId}`); await api.del("creneaux",`id=eq.${crId}`); refresh(); } };
 
   const SlotCard = ({ slot }) => (
-    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 10, borderLeft: `4px solid ${(FORFAITS[slot.mode]||{}).c||C.accent}`, cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.04)" }} onClick={() => setSlotDetail(slot)}>
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 10, borderLeft: `4px solid ${(FORFAITS[slot.mode]||{}).c||C.accent}`, boxShadow: "0 2px 6px rgba(0,0,0,0.04)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
         <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{(slot.heure_debut||"").substring(0,5)}-{(slot.heure_fin||"").substring(0,5)}</span>
         <div style={{ display: "flex", gap: 6 }}>
           <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"}</Badge>
-          <button onClick={e => { e.stopPropagation(); setEditCr(slot); }} title="Modifier" style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>✏️</button>
-          <button onClick={e => { e.stopPropagation(); deleteCreneau(slot.id); }} title="Supprimer" style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>🗑️</button>
+          <button onClick={() => setEditCr(slot)} title="Modifier" style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>✏️</button>
+          <button onClick={() => deleteCreneau(slot.id)} title="Supprimer" style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>🗑️</button>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 3, marginBottom: 8 }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 4, borderRadius: 2, background: j<slot.students.length?C.accent:C.surfaceLight }} />)}</div>
-      <div style={{ fontSize: 11, color: C.textDim }}>{slot.students.length}/{slot.capacite} — cliquer pour détails</div>
+      <div style={{ display: "flex", gap: 3, marginBottom: 8 }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 4, borderRadius: 2, background: j<slot.studentCount?C.accent:C.surfaceLight }} />)}</div>
+      <div style={{ fontSize: 11, color: C.textDim }}>{slot.studentCount}/{slot.capacite}</div>
     </div>
   );
 
@@ -1452,18 +1490,18 @@ const CreneauxPage = ({ creneaux, affectations, eleves, refresh }) => {
             <div style={{ background: C.orange+"15", border: `2px solid ${C.orange}44`, borderRadius: 12, padding: "10px 16px", marginBottom: 12, fontWeight: 700, color: C.orange, fontSize: 15 }}>{plabel} — Semaine {grp.semaine}</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
               {grp.slots.map(slot => (
-                <div key={slot.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, borderLeft: `4px solid ${C.orange}`, cursor: "pointer", boxShadow: "0 2px 6px rgba(0,0,0,0.04)" }} onClick={() => setSlotDetail(slot)}>
+                <div key={slot.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, borderLeft: `4px solid ${C.orange}`, boxShadow: "0 2px 6px rgba(0,0,0,0.04)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                     <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{(slot.heure_debut||"").substring(0,5)}-{(slot.heure_fin||"").substring(0,5)}</span>
                     <div style={{ display: "flex", gap: 6 }}>
                       <Badge color={C.orange}>Lun→Ven</Badge>
-                      <button onClick={e => { e.stopPropagation(); setEditCr(slot); }} style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>✏️</button>
-                      <button onClick={e => { e.stopPropagation(); deleteCreneau(slot.id); }} style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>🗑️</button>
+                      <button onClick={() => setEditCr(slot)} style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>✏️</button>
+                      <button onClick={() => deleteCreneau(slot.id)} style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>🗑️</button>
                     </div>
                   </div>
                   <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarifMode(slot.mode)}€/h</Badge>
-                  <div style={{ display: "flex", gap: 3, margin: "10px 0 6px" }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 4, borderRadius: 2, background: j<slot.students.length?C.orange:C.surfaceLight }} />)}</div>
-                  <div style={{ fontSize: 11, color: C.textDim }}>{slot.students.length}/{slot.capacite} inscrits — cliquer pour détails</div>
+                  <div style={{ display: "flex", gap: 3, margin: "10px 0 6px" }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 4, borderRadius: 2, background: j<slot.studentCount?C.orange:C.surfaceLight }} />)}</div>
+                  <div style={{ fontSize: 11, color: C.textDim }}>{slot.studentCount}/{slot.capacite}</div>
                 </div>
               ))}
             </div>
@@ -1471,7 +1509,6 @@ const CreneauxPage = ({ creneaux, affectations, eleves, refresh }) => {
         })
       )}
       <CreneauModal open={newOpen||!!editCr} onClose={() => { setNewOpen(false); setEditCr(null); }} creneau={editCr} creneaux={creneaux} refresh={refresh} />
-      <SlotDetailModal open={!!slotDetail} onClose={() => setSlotDetail(null)} slot={slotDetail} eleves={eleves} affectations={affectations} refresh={refresh} />
     </div>
   );
 };
@@ -1710,24 +1747,19 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
   const getDispoSlot = useCallback((cr, dateStr) => {
     const dow = new Date(dateStr + "T12:00:00").getDay();
     const dayName = JOURS_SEMAINE[dow];
-    const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif);
-    // Nb total inscrits (abonnés + occasionnels) pour affichage
+    const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif
+      && !(a.date_debut && a.date_debut > dateStr)
+      && !(a.date_fin && a.date_fin < dateStr));
     const inscrits = cr.type_creneau === "stage"
       ? aff.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
       : aff.length;
-    // Seulement les abonnés comptent pour les places permanentes
     const abonnes = aff.filter(a => a.type_inscription === "abonne");
     const nbAbonnes = cr.type_creneau === "stage"
       ? abonnes.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
       : abonnes.length;
-    const placesLibres = Math.max(0, cr.capacite - nbAbonnes); // places permanentes libres
-    // Absences justifiées de ce jour = places provisoires SUPPLÉMENTAIRES
-    const absJusts = presences.filter(p => p.date_cours === dateStr && p.creneau_id === cr.id && p.statut === "absent_justifie");
-    const absJustsEleves = absJusts.map(p => eleves.find(e => e.id === p.eleve_id)).filter(Boolean);
-    const placesProvisSupp = absJusts.length; // provisoires en plus des places libres
-    const totalProvisoire = placesLibres + placesProvisSupp; // total dispo ce jour en provisoire
-    return { inscrits, nbAbonnes, placesLibres, placesProvisSupp, absJustsEleves, totalProvisoire, total: totalProvisoire };
-  }, [affectations, presences, eleves]);
+    const placesLibres = Math.max(0, cr.capacite - nbAbonnes);
+    return { inscrits, nbAbonnes, placesLibres };
+  }, [affectations]);
 
   // Slots applicables pour une date
   const getSlotsForDate = useCallback((dateStr) => {
@@ -1925,59 +1957,19 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
                       </div>
                     </div>
 
-                    {/* Détail disponibilités — nouvelle logique */}
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-                      {/* Bloc 1 : place permanente libre */}
-                      <div style={{ background:cr.dispo.placesLibres>0?C.success+"10":C.surfaceLight, border:`2px solid ${cr.dispo.placesLibres>0?C.success+"44":C.border}`, borderRadius:12, padding:14 }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                          <span style={{ fontSize:18 }}>🟢</span>
-                          <div>
-                            <div style={{ fontSize:10, fontWeight:700, color:cr.dispo.placesLibres>0?C.success:C.textDim, textTransform:"uppercase" }}>Place{cr.dispo.placesLibres>1?"s":""} permanente{cr.dispo.placesLibres>1?"s":""} libre{cr.dispo.placesLibres>1?"s":""}</div>
-                            <div style={{ fontSize:24, fontWeight:800, color:cr.dispo.placesLibres>0?C.success:C.textDim }}>{cr.dispo.placesLibres}</div>
-                          </div>
+                    {/* Places permanentes libres */}
+                    <div style={{ background:cr.dispo.placesLibres>0?C.success+"10":C.surfaceLight, border:`2px solid ${cr.dispo.placesLibres>0?C.success+"44":C.border}`, borderRadius:12, padding:14 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                        <span style={{ fontSize:22 }}>{cr.dispo.placesLibres>0?"🟢":"⛔"}</span>
+                        <div>
+                          <div style={{ fontSize:10, fontWeight:700, color:cr.dispo.placesLibres>0?C.success:C.textDim, textTransform:"uppercase" }}>Place{cr.dispo.placesLibres!==1?"s":""} permanente{cr.dispo.placesLibres!==1?"s":""} libre{cr.dispo.placesLibres!==1?"s":""}</div>
+                          <div style={{ fontSize:28, fontWeight:800, color:cr.dispo.placesLibres>0?C.success:C.textDim }}>{cr.dispo.placesLibres}</div>
                         </div>
-                        {cr.dispo.placesLibres > 0 ? (
-                          <div>
-                            <div style={{ fontSize:11, color:C.success, marginBottom:4 }}>✓ Inscription permanente possible</div>
-                            <div style={{ fontSize:11, color:C.success, opacity:0.8 }}>💬 Aussi disponible en provisoire ce jour</div>
-                          </div>
-                        ) : (
-                          <div style={{ fontSize:11, color:C.textDim }}>Tous les abonnés sont inscrits ({cr.dispo.nbAbonnes}/{cr.capacite})</div>
-                        )}
                       </div>
-
-                      {/* Bloc 2 : absences justifiées du jour = places provisoires supplémentaires */}
-                      <div style={{ background:cr.dispo.placesProvisSupp>0?C.warning+"10":C.surfaceLight, border:`2px solid ${cr.dispo.placesProvisSupp>0?C.warning+"44":C.border}`, borderRadius:12, padding:14 }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                          <span style={{ fontSize:18 }}>💬</span>
-                          <div>
-                            <div style={{ fontSize:10, fontWeight:700, color:cr.dispo.placesProvisSupp>0?C.warning:C.textDim, textTransform:"uppercase" }}>Absence{cr.dispo.placesProvisSupp>1?"s":""} justifiée{cr.dispo.placesProvisSupp>1?"s":""} ce jour</div>
-                            <div style={{ fontSize:24, fontWeight:800, color:cr.dispo.placesProvisSupp>0?C.warning:C.textDim }}>{cr.dispo.placesProvisSupp}</div>
-                          </div>
-                        </div>
-                        {cr.dispo.placesProvisSupp > 0 ? (
-                          <div>
-                            <div style={{ fontSize:11, color:C.warning, marginBottom:6 }}>Place{cr.dispo.placesProvisSupp>1?"s":""} provisoire{cr.dispo.placesProvisSupp>1?"s":""} supplémentaire{cr.dispo.placesProvisSupp>1?"s":""} :</div>
-                            {cr.dispo.absJustsEleves.map(el => (
-                              <div key={el.id} style={{ display:"flex", alignItems:"center", gap:6, padding:"4px 8px", background:C.warning+"15", borderRadius:6, marginTop:3 }}>
-                                <span style={{ fontSize:13 }}>👤</span>
-                                <span style={{ fontSize:12, fontWeight:600, color:C.text }}>{el.prenom} {el.nom}</span>
-                                <Badge color={C.purple}>{el.classe}</Badge>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div style={{ fontSize:11, color:C.textDim }}>Aucune absence déclarée pour ce jour</div>
-                        )}
+                      <div style={{ fontSize:11, color:cr.dispo.placesLibres>0?C.success:C.textDim }}>
+                        {cr.dispo.placesLibres>0 ? `✓ Inscription abonné possible — ${cr.dispo.nbAbonnes}/${cr.capacite} places occupées` : `Complet — ${cr.dispo.nbAbonnes}/${cr.capacite} abonnés`}
                       </div>
                     </div>
-                    {/* Total provisoire ce jour */}
-                    {cr.dispo.totalProvisoire > 0 && (
-                      <div style={{ marginTop:10, background:C.blue+"10", border:`1px solid ${C.blue}33`, borderRadius:8, padding:"8px 14px", fontSize:12, color:C.blue, fontWeight:700 }}>
-                        → Total disponible ce jour (provisoire) : {cr.dispo.totalProvisoire} place{cr.dispo.totalProvisoire>1?"s":""}
-                        {cr.dispo.placesLibres > 0 && cr.dispo.placesProvisSupp > 0 && <span style={{ fontWeight:400 }}> ({cr.dispo.placesLibres} permanente{cr.dispo.placesLibres>1?"s":""} + {cr.dispo.placesProvisSupp} absence{cr.dispo.placesProvisSupp>1?"s":""})</span>}
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
