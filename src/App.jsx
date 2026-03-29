@@ -195,199 +195,28 @@ const PaymentModal = ({ open, onClose, eleves, preselectedEleve, refresh }) => {
   );
 };
 
-// ═══ CRÉNEAU MODAL ═══
-const CreneauModal = ({ open, onClose, creneau, creneaux, refresh }) => {
-  const [form, setForm] = useState({ jour: "Lundi", heure_debut: "16:00", heure_fin: "17:00", mode: "groupe", capacite: 6, type_creneau: "regulier", periode_vacances: null, semaine_vacances: 1 });
-  const [saving, setSaving] = useState(false);
-  const [conflictMsg, setConflictMsg] = useState("");
-  useEffect(() => {
-    if (creneau) setForm({ jour: creneau.jour, heure_debut: creneau.heure_debut?.substring(0,5)||"16:00", heure_fin: creneau.heure_fin?.substring(0,5)||"17:00", mode: creneau.mode, capacite: creneau.capacite, type_creneau: creneau.type_creneau || "regulier", periode_vacances: creneau.periode_vacances || "toussaint", semaine_vacances: creneau.semaine_vacances || 1 });
-    else setForm({ jour: "Lundi", heure_debut: "16:00", heure_fin: "17:00", mode: "groupe", capacite: 6, type_creneau: "regulier", periode_vacances: "toussaint", semaine_vacances: 1 });
-    setConflictMsg("");
-  }, [creneau, open]);
-  const toMin = t => { const [h,m] = (t||"00:00").split(":").map(Number); return h*60+m; };
-  const save = async () => {
-    setConflictMsg("");
-    const startMin = toMin(form.heure_debut);
-    const endMin = toMin(form.heure_fin);
-    if (endMin <= startMin) { setConflictMsg("L'heure de fin doit être après l'heure de début."); return; }
-    const others = (creneaux||[]).filter(cr => {
-      if (creneau && cr.id === creneau.id) return false;
-      if (form.type_creneau === "regulier") return (cr.type_creneau||"regulier") === "regulier" && cr.jour === form.jour;
-      return cr.type_creneau === "stage" && cr.periode_vacances === form.periode_vacances && (cr.semaine_vacances||1) === parseInt(form.semaine_vacances);
-    });
-    const conflict = others.find(cr => toMin(cr.heure_debut) < endMin && startMin < toMin(cr.heure_fin));
-    if (conflict) { setConflictMsg(`⚠️ Conflit avec le créneau ${(conflict.heure_debut||"").substring(0,5)}-${(conflict.heure_fin||"").substring(0,5)}`); return; }
-    setSaving(true);
-    const data = { ...form, capacite: parseInt(form.capacite), periode_vacances: form.type_creneau === "stage" ? form.periode_vacances : null, semaine_vacances: form.type_creneau === "stage" ? parseInt(form.semaine_vacances) : null, jour: form.type_creneau === "stage" ? "Lundi" : form.jour };
-    if (creneau) await api.patch("creneaux", `id=eq.${creneau.id}`, data);
-    else await api.post("creneaux", data);
-    setSaving(false); onClose(); refresh();
-  };
-  const isStage = form.type_creneau === "stage";
-  return (
-    <Modal open={open} onClose={onClose} title={creneau ? "✏️ Modifier créneau" : "➕ Nouveau créneau"}>
-      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
-        {[["regulier","📅 Régulier"],["stage","🏖️ Vacances"]].map(([k,l]) => (
-          <div key={k} onClick={() => setForm({...form, type_creneau: k})} style={{ flex: 1, padding: 12, borderRadius: 10, textAlign: "center", cursor: "pointer", border: `2px solid ${form.type_creneau===k?(k==="stage"?C.orange:C.accent):C.border}`, background: form.type_creneau===k?(k==="stage"?C.orange:C.accent)+"15":"transparent", color: form.type_creneau===k?C.text:C.textMuted, fontWeight: 700, fontSize: 14 }}>{l}</div>
-        ))}
-      </div>
-      {isStage && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Input label="Période" value={form.periode_vacances||"toussaint"} onChange={v => setForm({...form, periode_vacances: v})} options={PERIODES} />
-          <Input label="Semaine" value={form.semaine_vacances} onChange={v => setForm({...form, semaine_vacances: v})} options={[["1","Semaine 1"],["2","Semaine 2"]]} />
-        </div>
-      )}
-      {isStage ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Input label="Début" value={form.heure_debut} onChange={v => setForm({...form, heure_debut: v})} type="time" />
-          <Input label="Fin" value={form.heure_fin} onChange={v => setForm({...form, heure_fin: v})} type="time" />
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-          <Input label="Jour" value={form.jour} onChange={v => setForm({...form, jour: v})} options={JOURS_ALL.map(j => [j, j])} />
-          <Input label="Début" value={form.heure_debut} onChange={v => setForm({...form, heure_debut: v})} type="time" />
-          <Input label="Fin" value={form.heure_fin} onChange={v => setForm({...form, heure_fin: v})} type="time" />
-        </div>
-      )}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Input label="Mode" value={form.mode} onChange={v => setForm({...form, mode: v})} options={Object.entries(FORFAITS).map(([k,v]) => [k, `${v.l} (${v.t}€/h)`])} />
-        <Input label="Capacité" value={form.capacite} onChange={v => setForm({...form, capacite: v})} type="number" />
-      </div>
-      {isStage && <div style={{ background: C.orange+"15", borderRadius: 10, padding: 12, marginTop: 6, fontSize: 12, color: C.orange, border: `1px solid ${C.orange}33` }}>🏖️ Ce créneau apparaîtra <b>du lundi au vendredi</b> (semaine {form.semaine_vacances}) des vacances {ALL_VACANCES.find(v=>v.id===form.periode_vacances)?.label||""}.</div>}
-      {conflictMsg && <div style={{ background: C.danger+"15", border: `2px solid ${C.danger}44`, borderRadius: 10, padding: "10px 14px", marginTop: 12, fontSize: 13, color: C.danger, fontWeight: 700 }}>{conflictMsg}</div>}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-        <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
-        <Btn onClick={save} disabled={saving} color={isStage?C.orange:C.accent}>{saving?"...":creneau?"Modifier":"Créer"}</Btn>
-      </div>
-    </Modal>
-  );
-};
-
-// ═══ SLOT DETAIL MODAL ═══
-const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh }) => {
-  const [addEleve, setAddEleve] = useState("");
-  const [addType, setAddType] = useState("abonne");
-  const [addJours, setAddJours] = useState(JOURS_STAGE.map(() => true));
-  const [addDatesOccasion, setAddDatesOccasion] = useState([]);
-  useEffect(() => {
-    if (open) {
-      setAddEleve("");
-      setAddType("abonne");
-      setAddJours(JOURS_STAGE.map(() => true));
-      setAddDatesOccasion([]);
-    }
-  }, [open, slot?.id]);
+// ═══ SLOT DETAIL MODAL (vue rapide — Tableau de bord) ═══
+const SlotDetailModal = ({ open, onClose, slot, eleves, affectations }) => {
   if (!open || !slot) return null;
-  const isStage = slot.type_creneau === "stage";
-  const allAffs = affectations.filter(a => a.creneau_id === slot.id && a.actif);
-  const students = allAffs.map(a => { const el = eleves.find(e => e.id === a.eleve_id); return el ? { ...el, affectation_id: a.id, type_inscription: a.type_inscription, jours_stage: a.jours_stage, dates_occasion: a.dates_occasion } : null; }).filter(Boolean);
-  const jourCounts = isStage ? JOURS_STAGE.map(j => allAffs.filter(a => !a.jours_stage || a.jours_stage.includes(j)).length) : [];
-  const removeStudent = async (affId) => { await api.del("affectations_creneaux", `id=eq.${affId}`); refresh(); };
-  const addStudent = async () => {
-    if (!addEleve) return;
-    const joursStr = isStage ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
-    const typeInscription = isStage ? "stage" : addType;
-    const datesOcc = !isStage && addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
-    // Upsert : réactiver une ligne inactive si elle existe (évite contrainte unique)
-    const reactivated = await api.patch("affectations_creneaux",
-      `eleve_id=eq.${addEleve}&creneau_id=eq.${slot.id}&actif=eq.false`,
-      { actif: true, type_inscription: typeInscription, jours_stage: joursStr });
-    if (!reactivated || reactivated.length === 0) {
-      const created = await api.post("affectations_creneaux", { eleve_id: addEleve, creneau_id: slot.id, type_inscription: typeInscription, actif: true, jours_stage: joursStr });
-      if (!created) return;
-    }
-    if (datesOcc) await api.patch("affectations_creneaux", `eleve_id=eq.${addEleve}&creneau_id=eq.${slot.id}&actif=eq.true`, { dates_occasion: datesOcc });
-    setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddDatesOccasion([]); refresh();
-  };
-  const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
-  const isFullForAbonne = !isStage && slot.capacite != null && students.length >= slot.capacite && addType === "abonne";
-  const needsDates = !isStage && addType === "occasionnel";
-  const canAdd = !isFullForAbonne && (isStage
-    ? JOURS_STAGE.some((_, i) => addJours[i] && jourCounts[i] < slot.capacite)
-    : (!needsDates || addDatesOccasion.length > 0));
-
+  const students = affectations
+    .filter(a => a.creneau_id === slot.id && a.actif)
+    .map(a => eleves.find(e => e.id === a.eleve_id))
+    .filter(Boolean)
+    .sort((a, b) => a.nom.localeCompare(b.nom));
+  const label = `${slot.jour || "Stage"} ${(slot.heure_debut || "").substring(0, 5)}–${(slot.heure_fin || "").substring(0, 5)}`;
   return (
-    <Modal open={open} onClose={onClose} title={`${isStage?"Lun→Ven":slot.jour} ${(slot.heure_debut||"").substring(0,5)}-${(slot.heure_fin||"").substring(0,5)}`} wide>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||slot.mode} · {tarifMode(slot.mode)}€/h</Badge>
-        {isStage && <Badge color={C.orange}>Stage {periodeLabel} — S{slot.semaine_vacances}</Badge>}
-        {!isStage && <><Badge color={C.accent}>Régulier</Badge><Badge color={C.textMuted}>{students.length}/{slot.capacite} places</Badge></>}
+    <Modal open={open} onClose={onClose} title={`📋 ${label}`}>
+      <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 16, fontWeight: 700 }}>
+        {students.length}/{slot.capacite || "?"} inscrits · {FORFAITS[slot.mode]?.l || slot.mode}
       </div>
-
-      {isStage && (
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {JOURS_STAGE.map((j, i) => {
-            const full = jourCounts[i] >= slot.capacite;
-            return (<div key={j} style={{ flex: 1, textAlign: "center", padding: "8px 6px", borderRadius: 10, background: full ? C.danger+"15" : C.surfaceLight, border: `2px solid ${full ? C.danger+"44" : C.border}` }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: full ? C.danger : C.textMuted }}>{j.substring(0,3)}</div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: full ? C.danger : C.text }}>{jourCounts[i]}/{slot.capacite}</div>
-            </div>);
-          })}
-        </div>
-      )}
-
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Élèves inscrits ({students.length})</div>
-        {students.length === 0 ? <div style={{ color: C.textDim, fontSize: 13, padding: 20, textAlign: "center", background: C.surfaceLight, borderRadius: 10 }}>Aucun élève inscrit</div> :
-          students.map(st => (
-            <div key={st.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderRadius: 10, background: C.surfaceLight, marginBottom: 6, border: `1px solid ${C.border}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>
-                <Badge color={C.purple}>{st.classe}</Badge>
-                {isStage && st.jours_stage && <span style={{ fontSize: 11, color: C.orange, fontWeight: 600 }}>{st.jours_stage.split(",").map(j => j.substring(0,3)).join(" · ")}</span>}
-                {!isStage && st.type_inscription === "occasionnel" && <Badge color={C.warning}>Occ.</Badge>}
-              </div>
-              <button onClick={() => removeStudent(st.affectation_id)} style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "4px 10px", borderRadius: 6, fontWeight: 600 }}>✕ Retirer</button>
-            </div>
-          ))
-        }
-      </div>
-
-      <div style={{ borderTop: `2px solid ${C.border}`, paddingTop: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Inscrire un élève</div>
-        <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"], ...eleves.filter(e => e.actif && !students.find(s => s.id === e.id)).sort((a,b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
-          {isStage ? (
-            <div>
-              <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Jours de présence</div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                {JOURS_STAGE.map((j, i) => {
-                  const full = jourCounts[i] >= slot.capacite;
-                  const checked = addJours[i] && !full;
-                  return (<label key={j} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 6px", borderRadius: 10, border: `2px solid ${checked ? C.orange : full ? C.danger+"44" : C.border}`, background: checked ? C.orange+"15" : full ? C.danger+"08" : "transparent", cursor: full ? "not-allowed" : "pointer", opacity: full ? 0.5 : 1 }}>
-                    <input type="checkbox" checked={checked} disabled={full} onChange={() => { const nj = [...addJours]; nj[i] = !nj[i]; setAddJours(nj); }} style={{ accentColor: C.orange, width: 18, height: 18 }} />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: checked ? C.orange : full ? C.danger : C.textMuted }}>{j.substring(0,3)}</span>
-                    {full && <span style={{ fontSize: 9, color: C.danger }}>Complet</span>}
-                  </label>);
-                })}
-              </div>
-            </div>
-          ) : (<>
-            <Input label="Type" value={addType} onChange={v => { setAddType(v); setAddDatesOccasion([]); }} options={[["abonne","🔄 Abonné"],["occasionnel","⚡ Occasionnel"]]} />
-            {isFullForAbonne && <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"10px 14px", marginBottom:10, fontSize:13, fontWeight:700, color:C.danger }}>🚫 Complet pour un abonné ({students.length}/{slot.capacite}) — choisissez "Occasionnel" pour inscrire quand même</div>}
-            {addType === "occasionnel" && (() => {
-              const today = todayStr();
-              const todayIsSlotDay = new Date(today + "T12:00:00").getDay() === JOURS_SEMAINE.indexOf(slot.jour);
-              const nextDates = todayIsSlotDay ? [today, ...getNextOccurrences(slot.jour, today, 7)] : getNextOccurrences(slot.jour, today, 8);
-              return (<div style={{ marginTop: 6, marginBottom: 6 }}>
-                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 700 }}>Séances concernées <span style={{ color: C.warning }}>(cocher les dates)</span></div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 4 }}>
-                  {nextDates.map(d => {
-                    const sel = addDatesOccasion.includes(d);
-                    return (<label key={d} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 10px", borderRadius: 10, border: `2px solid ${sel ? C.warning : C.border}`, background: sel ? C.warning+"15" : "transparent", cursor: "pointer", minWidth: 56 }}>
-                      <input type="checkbox" checked={sel} onChange={() => setAddDatesOccasion(prev => sel ? prev.filter(x => x !== d) : [...prev, d])} style={{ accentColor: C.warning, width: 16, height: 16 }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: sel ? C.warning : C.text }}>{fmtDateFr(d)}</span>
-                    </label>);
-                  })}
-                </div>
-                <div style={{ fontSize: 11, color: C.textDim }}>{addDatesOccasion.length} séance{addDatesOccasion.length > 1 ? "s" : ""} sélectionnée{addDatesOccasion.length > 1 ? "s" : ""}</div>
-              </div>);
-            })()}
-          </>)}
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Btn onClick={addStudent} disabled={!addEleve || !canAdd} color={C.success}>+ Inscrire</Btn>
+      {students.length === 0
+        ? <div style={{ color: C.textDim, padding: "20px 0", textAlign: "center" }}>Aucun élève inscrit</div>
+        : students.map(s => (
+          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: C.surfaceLight, marginBottom: 6 }}>
+            <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{s.prenom} {s.nom}</span>
+            <Badge color={C.purple}>{s.classe}</Badge>
           </div>
-      </div>
+        ))}
     </Modal>
   );
 };
@@ -523,655 +352,281 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
   );
 };
 
-// ═══ VUE SEMAINE (style Pronote) ═══
-const WeekView = ({ creneaux, affectations, presences, baseDate, onDayClick, onWeekChange, onSlotClick }) => {
-  const weekDates = useMemo(() => getWeekDates(baseDate), [baseDate]);
-  const today = todayStr();
+// ═══ PLANNING / APPEL ═══
+const PlanningPage = ({ creneaux, affectations, eleves, presences: initialPresences, refresh, initialDate }) => {
+  const [weekStart, setWeekStart] = useState(() => getWeekDates(initialDate || getSmartDay().date)[0]);
+  const [selectedSlot, setSelectedSlot] = useState(null); // { slot, dateStr }
+  const [localPresences, setLocalPresences] = useState(initialPresences || []);
+  const [addEleve, setAddEleve] = useState("");
+  const [addType, setAddType] = useState("abonne");
+  const [saving, setSaving] = useState(false);
 
-  const weekData = useMemo(() => weekDates.map(dateStr => {
+  const weekDates = useMemo(() => getWeekDates(weekStart), [weekStart]);
+  const weekNum = getWeekNumber(weekStart);
+
+  const loadWeekPresences = useCallback(async () => {
+    const d = await api.get("presences", `date_cours=gte.${weekDates[0]}&date_cours=lte.${weekDates[weekDates.length - 1]}`);
+    setLocalPresences(d || []);
+  }, [weekDates]);
+
+  useEffect(() => { loadWeekPresences(); }, [loadWeekPresences]);
+
+  const navigate = (dir) => {
+    const d = new Date(weekStart + "T12:00:00");
+    d.setDate(d.getDate() + dir * 7);
+    setWeekStart(d.toISOString().split("T")[0]);
+    setSelectedSlot(null);
+  };
+
+  const getCreneauxForDate = useCallback((dateStr) => {
     const ctx = getDateContext(dateStr);
     const dow = new Date(dateStr + "T12:00:00").getDay();
     const dayName = JOURS_SEMAINE[dow];
-    let slots = [];
-    if (ctx.type !== "samedi_milieu" && dow !== 0) {
-      if (ctx.type === "vacances" && dow >= 1 && dow <= 5) {
-        slots = creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === ctx.vacance?.id && cr.semaine_vacances === ctx.semaine);
-      } else if (ctx.type === "hors_vacances" && dow >= 1 && dow <= 6) {
-        slots = creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dayName);
-      }
+    let slots;
+    if (ctx.type === "vacances") {
+      slots = creneaux.filter(cr =>
+        cr.type_creneau === "stage" &&
+        cr.periode_vacances === ctx.vacance?.id &&
+        (cr.semaine_vacances === ctx.semaine || cr.semaine_vacances === null)
+      );
+    } else {
+      slots = creneaux.filter(cr =>
+        (cr.type_creneau || "regulier") === "regulier" && cr.jour === dayName
+      );
     }
-    const slotsWithData = slots.sort((a,b) => (a.heure_debut||"").localeCompare(b.heure_debut||"")).map(cr => {
+    return slots.map(cr => {
       const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif);
-      // Count students expected on this specific date (handles abonné, occasionnel, old jours_stage)
-      const inscribed = ctx.type === "vacances"
-        ? aff.filter(a => {
-            if (a.date_debut && a.date_debut > dateStr) return false;
-            if (a.date_fin && a.date_fin < dateStr) return false;
-            if (a.jours_stage) return a.jours_stage.includes(dayName);
-            if (a.type_inscription === "occasionnel" && a.dates_occasion) return a.dates_occasion.split(",").includes(dateStr);
-            return true;
-          }).length
-        : aff.filter(a => {
-            if (a.date_debut && a.date_debut > dateStr) return false;
-            if (a.date_fin && a.date_fin < dateStr) return false;
-            if (a.type_inscription === "occasionnel" && a.dates_occasion) return a.dates_occasion.split(",").includes(dateStr);
-            return true;
-          }).length;
-      const dayPres = presences.filter(p => p.date_cours === dateStr && p.creneau_id === cr.id);
-      const absJust = dayPres.filter(p => p.statut === "absent_justifie").length;
-      // n = présents attendus = inscrits - absences prévenus
-      const n = Math.max(0, inscribed - absJust);
-      const pct = cr.capacite > 0 ? inscribed / cr.capacite : 0;
-      const fillColor = pct >= 1 ? C.danger : pct >= 0.5 ? C.warning : inscribed > 0 ? C.success : C.textDim;
-      const fillLabel = pct >= 1 ? "Complet" : pct >= 0.5 ? "Partiel" : inscribed > 0 ? "Libre" : "Vide";
-      const appelFait = inscribed > 0 && dayPres.length >= inscribed;
-      const isFuture = dateStr > today;
-      return { ...cr, n, inscribed, pct, fillColor, fillLabel, appelFait, isFuture, absJust };
-    });
-    return { dateStr, ctx, dayName, dow, slots: slotsWithData, isToday: dateStr === today };
-  }), [weekDates, creneaux, affectations, presences, today]);
+      const students = aff.map(a => {
+        if (a.type_inscription === "occasionnel") {
+          if (!a.dates_occasion || !a.dates_occasion.split(",").map(d => d.trim()).includes(dateStr)) return null;
+        }
+        const el = eleves.find(e => e.id === a.eleve_id);
+        if (!el) return null;
+        const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id && p.date_cours === dateStr);
+        return { ...el, type_inscription: a.type_inscription, affectation_id: a.id, dates_occasion: a.dates_occasion, presence: pres || null };
+      }).filter(Boolean);
+      const effCount = students.filter(s => s.presence?.statut !== "absent_justifie").length;
+      const pct = cr.capacite ? effCount / cr.capacite : 0;
+      return { ...cr, students, effCount, pct };
+    }).sort((a, b) => (a.heure_debut || "").localeCompare(b.heure_debut || ""));
+  }, [creneaux, affectations, eleves, localPresences]);
 
-  const d0 = new Date(weekDates[0]); const d5 = new Date(weekDates[5]);
-  const wNum = getWeekNumber(weekDates[0]);
-  const wLabel = `${d0.getDate()} ${d0.toLocaleDateString("fr-FR",{month:"short"})} — ${d5.getDate()} ${d5.toLocaleDateString("fr-FR",{month:"short",year:"numeric"})}`;
-  const vacCtx = weekData.find(d => d.ctx.type === "vacances")?.ctx;
-
-  const goPrev = () => { if (!onWeekChange) return; const d = new Date(weekDates[0]); d.setDate(d.getDate()-7); onWeekChange(d.toISOString().split("T")[0]); };
-  const goNext = () => { if (!onWeekChange) return; const d = new Date(weekDates[0]); d.setDate(d.getDate()+7); onWeekChange(d.toISOString().split("T")[0]); };
-
-  return (
-    <div>
-      {/* Bandeau semaine + navigation */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, flexWrap:"wrap", gap:8 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-          {onWeekChange && <button onClick={goPrev} style={{ background:C.surfaceLight, border:`1px solid ${C.border}`, color:C.text, cursor:"pointer", width:32, height:32, borderRadius:8, fontWeight:800, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>‹</button>}
-          <span style={{ background:C.accent+"20", color:C.accent, fontWeight:800, fontSize:13, padding:"4px 14px", borderRadius:20, border:`1px solid ${C.accent}44` }}>S{wNum}</span>
-          <span style={{ fontSize:14, fontWeight:700, color:C.textMuted }}>{wLabel}</span>
-          {vacCtx && <span style={{ background:C.orange+"20", color:C.orange, fontWeight:700, fontSize:12, padding:"4px 12px", borderRadius:20, border:`1px solid ${C.orange}44` }}>🏕️ {vacCtx.vacance.label} — S{vacCtx.semaine}</span>}
-          {onWeekChange && <button onClick={goNext} style={{ background:C.surfaceLight, border:`1px solid ${C.border}`, color:C.text, cursor:"pointer", width:32, height:32, borderRadius:8, fontWeight:800, fontSize:18, display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>›</button>}
-        </div>
-        {onWeekChange && <button onClick={() => onWeekChange(today)} style={{ background:C.accent+"15", border:`1px solid ${C.accent}44`, color:C.accent, cursor:"pointer", padding:"5px 14px", borderRadius:8, fontWeight:700, fontSize:12 }}>Aujourd'hui</button>}
-      </div>
-
-      {/* Légende */}
-      <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
-        {[[C.success,"Libre"],[C.warning,"Partiel"],[C.danger,"Complet"],[C.blue,"Appel fait"]].map(([col,lbl]) => (
-          <div key={lbl} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:C.textMuted }}>
-            <div style={{ width:12, height:12, borderRadius:3, background:lbl==="Appel fait"?col+"60":col, ...(lbl==="Appel fait"?{border:`1px solid ${col}`}:{}) }} />{lbl}
-          </div>
-        ))}
-      </div>
-
-      {/* Grille 6 colonnes */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(6, 1fr)", gap:8 }}>
-        {weekData.map(day => (
-          <div key={day.dateStr}>
-            {/* En-tête jour */}
-            <div
-              onClick={() => onDayClick(day.dateStr)}
-              style={{ padding:"10px 6px", textAlign:"center", borderRadius:10, marginBottom:8, cursor:"pointer",
-                background: day.isToday ? C.accent+"25" : C.surfaceLight,
-                border: `2px solid ${day.isToday ? C.accent : C.border}`,
-                transition:"all 0.15s" }}
-              onMouseEnter={e => e.currentTarget.style.borderColor=C.accent}
-              onMouseLeave={e => e.currentTarget.style.borderColor=day.isToday?C.accent:C.border}
-            >
-              <div style={{ fontSize:10, fontWeight:700, color:day.isToday?C.accent:C.textMuted, textTransform:"uppercase", letterSpacing:1 }}>{day.dayName.substring(0,3)}</div>
-              <div style={{ fontSize:18, fontWeight:800, color:day.isToday?C.accent:C.text }}>{new Date(day.dateStr).getDate()}</div>
-              {day.isToday && <div style={{ fontSize:9, color:C.accent, fontWeight:700, marginTop:2 }}>Aujourd'hui</div>}
-            </div>
-
-            {/* Contenu du jour */}
-            {day.ctx.type === "samedi_milieu" ? (
-              <div style={{ fontSize:10, color:C.textDim, textAlign:"center", padding:"12px 4px", background:C.surfaceLight, borderRadius:8, border:`1px dashed ${C.border}` }}>Milieu vac.</div>
-            ) : day.slots.length === 0 ? (
-              <div style={{ fontSize:10, color:C.textDim, textAlign:"center", padding:"20px 4px" }}>—</div>
-            ) : (
-              day.slots.map(slot => (
-                <div
-                  key={slot.id}
-                  onClick={() => onSlotClick ? onSlotClick(slot, day.dateStr) : onDayClick(day.dateStr)}
-                  style={{ background: slot.appelFait ? C.blue+"15" : slot.fillColor+"15",
-                    border: `2px solid ${slot.appelFait ? C.blue+"66" : slot.fillColor+"55"}`,
-                    borderLeft: `4px solid ${slot.appelFait ? C.blue : slot.fillColor}`,
-                    borderRadius:10, padding:"8px 8px", marginBottom:6, cursor:"pointer", transition:"all 0.15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.transform="translateY(-1px)"; e.currentTarget.style.boxShadow="0 4px 12px rgba(0,0,0,0.1)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform="none"; e.currentTarget.style.boxShadow="none"; }}
-                >
-                  <div style={{ fontSize:12, fontWeight:800, color:C.text }}>{(slot.heure_debut||"").substring(0,5)}</div>
-                  <div style={{ fontSize:10, color:C.textMuted, marginBottom:3 }}>{(slot.heure_fin||"").substring(0,5)}</div>
-                  <div style={{ display:"flex", gap:2, marginBottom:4 }}>
-                    {Array.from({length: Math.min(slot.capacite, 8)}).map((_, j) => (
-                      <div key={j} style={{ flex:1, height:4, borderRadius:2, background: j < slot.inscribed ? slot.fillColor : C.border }} />
-                    ))}
-                  </div>
-                  <div style={{ fontSize:10, fontWeight:700, color: slot.appelFait ? C.blue : slot.fillColor }}>
-                    {slot.n}/{slot.capacite}
-                    {slot.absJust > 0 && !slot.appelFait && <span style={{ fontWeight:400, color:C.warning, fontSize:9 }}> (−{slot.absJust})</span>}
-                  </div>
-                  {slot.appelFait ? (
-                    <div style={{ fontSize:9, color:C.blue, fontWeight:700, marginTop:2 }}>✓ Appel fait</div>
-                  ) : slot.inscribed > 0 && slot.isFuture ? (
-                    <div style={{ fontSize:9, color:C.accent, fontWeight:600, marginTop:2 }}>→ Faire l'appel</div>
-                  ) : slot.inscribed > 0 ? (
-                    <div style={{ fontSize:9, color:C.warning, fontWeight:700, marginTop:2 }}>⚡ En attente</div>
-                  ) : null}
-                  <div style={{ fontSize:9, color:C.textDim, marginTop:2 }}>{(FORFAITS[slot.mode]||{}).l||slot.mode}</div>
-                </div>
-              ))
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// ═══ MODAL VALIDATION SÉANCE & FACTURATION ═══
-const ValidationSeanceModal = ({ open, onClose, slot, dateStr, students, suiviMensuel, refresh }) => {
-  const [mois, setMois] = useState(getMoisActuel());
-  const [saving, setSaving] = useState(false);
-  useEffect(() => { if (open) setMois(getMoisActuel()); }, [open]);
-  if (!open || !slot) return null;
-
-  const tarif = tarifMode(slot.mode);
-  const dur = slotDur(slot);
-
-  // Présents (facturation réelle) + absents non justifiés (facturés quand même)
-  const aFacturer = students.filter(st =>
-    st.presence?.statut === "present" || st.presence?.statut === "absent_non_justifie"
-  ).map(st => {
-    const isPresent = st.presence.statut === "present";
-    const hrs = isPresent ? parseFloat(st.presence.heures || dur) : dur;
-    return { ...st, hrs, montant: tarif * hrs, isPresent };
-  });
-
-  const nonMarques = students.filter(st => !st.presence);
-  const absJustifies = students.filter(st => st.presence?.statut === "absent_justifie");
-  const grandTotal = aFacturer.reduce((s, st) => s + st.montant, 0);
-
-  // Groupement par famille (nom_parent1)
-  const familles = {};
-  aFacturer.forEach(st => {
-    const fkey = st.nom_parent1?.trim() || `${st.prenom} ${st.nom}`;
-    if (!familles[fkey]) familles[fkey] = { label: fkey, students: [], total: 0 };
-    familles[fkey].students.push(st);
-    familles[fkey].total += st.montant;
-  });
-
-  // Vérifie si déjà facturé ce mois
-  const existingFor = (eid) => suiviMensuel.find(s => s.eleve_id === eid && s.mois === mois);
-
-  const validate = async () => {
-    setSaving(true);
-    for (const st of aFacturer) {
-      const ex = existingFor(st.id);
-      if (ex) {
-        await api.patch("suivi_mensuel", `id=eq.${ex.id}`, { montant_facture: parseFloat(ex.montant_facture || 0) + st.montant });
-      } else {
-        await api.post("suivi_mensuel", { eleve_id: st.id, mois, montant_facture: st.montant });
-      }
-    }
-    setSaving(false); onClose(); refresh();
+  const reloadDate = async (dateStr) => {
+    const d = await api.get("presences", `date_cours=eq.${dateStr}`);
+    setLocalPresences(prev => [...prev.filter(p => p.date_cours !== dateStr), ...(d || [])]);
   };
 
-  const dateLabel = new Date(dateStr).toLocaleDateString("fr-FR", { weekday: "long", day: "2-digit", month: "long" });
-  const slotLabel = `${(slot.heure_debut||"").substring(0,5)}–${(slot.heure_fin||"").substring(0,5)}`;
+  const currentData = useMemo(() => {
+    if (!selectedSlot) return null;
+    const slots = getCreneauxForDate(selectedSlot.dateStr);
+    return slots.find(s => s.id === selectedSlot.slot.id) || null;
+  }, [selectedSlot, getCreneauxForDate]);
 
-  return (
-    <Modal open={open} onClose={onClose} title="💶 Validation séance & Facturation" wide>
-      {/* En-tête séance */}
-      <div style={{ background: C.surfaceLight, borderRadius: 12, padding: "12px 16px", marginBottom: 18, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{dateLabel} · {slotLabel}</span>
-        <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||slot.mode} · {tarif}€/h</Badge>
-        <Badge color={C.textMuted}>{students.length} élève{students.length>1?"s":""}</Badge>
-      </div>
+  const availableEleves = useMemo(() => {
+    if (!selectedSlot) return [];
+    const assignedIds = affectations.filter(a => a.creneau_id === selectedSlot.slot.id && a.actif).map(a => a.eleve_id);
+    return eleves.filter(e => e.actif && !assignedIds.includes(e.id));
+  }, [selectedSlot, affectations, eleves]);
 
-      {/* Avertissement non marqués */}
-      {nonMarques.length > 0 && (
-        <div style={{ background: C.warning+"15", border: `2px solid ${C.warning}44`, borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: C.warning, fontWeight: 600 }}>
-          ⚠️ {nonMarques.length} élève{nonMarques.length>1?"s":""} non marqué{nonMarques.length>1?"s":""} : {nonMarques.map(st => `${st.prenom} ${st.nom}`).join(", ")}
-        </div>
-      )}
-
-      {/* Absents justifiés (non facturés) */}
-      {absJustifies.length > 0 && (
-        <div style={{ background: C.blue+"10", border: `1px solid ${C.blue}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: C.blue }}>
-          💬 Non facturés (absents prévenus) : {absJustifies.map(st => `${st.prenom} ${st.nom}`).join(", ")}
-        </div>
-      )}
-
-      {/* Tableau par famille */}
-      {aFacturer.length === 0 ? (
-        <div style={{ textAlign: "center", padding: 30, color: C.textMuted, fontSize: 14 }}>
-          Aucun élève à facturer pour cette séance.
-        </div>
-      ) : (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.textMuted, textTransform: "uppercase", marginBottom: 10 }}>
-            Facturation par famille
-          </div>
-          {Object.entries(familles).map(([fkey, fam]) => {
-            const exTotal = fam.students.reduce((s, st) => s + parseFloat(existingFor(st.id)?.montant_facture || 0), 0);
-            return (
-              <div key={fkey} style={{ background: C.surfaceLight, borderRadius: 12, padding: 14, marginBottom: 10, border: `1px solid ${C.border}` }}>
-                {/* En-tête famille */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 18 }}>👨‍👩‍👧</span>
-                    <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Famille {fkey}</span>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 800, fontSize: 18, color: C.success }}>{fam.total.toFixed(0)}€</div>
-                    {exTotal > 0 && <div style={{ fontSize: 11, color: C.textMuted }}>Déjà facturé ce mois : {exTotal.toFixed(0)}€ → nouveau total : {(exTotal + fam.total).toFixed(0)}€</div>}
-                  </div>
-                </div>
-                {/* Détail élèves */}
-                {fam.students.map(st => (
-                  <div key={st.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", borderRadius: 8, background: st.isPresent ? C.success+"10" : C.danger+"10", border: `1px solid ${st.isPresent ? C.success+"33" : C.danger+"33"}`, marginBottom: 4 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 13 }}>{st.isPresent ? "✓" : "❌"}</span>
-                      <span style={{ fontWeight: 600, fontSize: 13, color: C.text }}>{st.prenom} {st.nom}</span>
-                      <Badge color={C.purple}>{st.classe}</Badge>
-                      {!st.isPresent && <Badge color={C.danger}>Non prévenu</Badge>}
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: st.isPresent ? C.success : C.danger }}>
-                      {st.isPresent ? `${st.hrs}h × ${tarif}€` : `${dur}h × ${tarif}€`} = {st.montant.toFixed(0)}€
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Total + mois */}
-      {aFacturer.length > 0 && (
-        <>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: C.success+"15", border: `2px solid ${C.success}44`, borderRadius: 12, padding: "14px 18px", marginBottom: 18 }}>
-            <span style={{ fontWeight: 700, fontSize: 15, color: C.text }}>Total séance à facturer</span>
-            <span style={{ fontWeight: 800, fontSize: 24, color: C.success }}>{grandTotal.toFixed(0)}€</span>
-          </div>
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 8, textTransform: "uppercase" }}>Imputer au mois</div>
-            <select value={mois} onChange={e => setMois(e.target.value)} style={{ width: "100%", padding: "10px 14px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 14 }}>
-              {MOIS_ORDER.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-        </>
-      )}
-
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-        <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
-        {aFacturer.length > 0 && (
-          <Btn onClick={validate} disabled={saving} color={C.success}>
-            {saving ? "⏳ Enregistrement..." : `✓ Confirmer la facturation — ${grandTotal.toFixed(0)}€`}
-          </Btn>
-        )}
-      </div>
-    </Modal>
-  );
-};
-
-// ═══ PLANNING PRONOTE ═══
-const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel, refresh, initialDate }) => {
-  const [selectedDate, setSelectedDate] = useState(initialDate || getSmartDay().date);
-  const [viewMode, setViewMode] = useState("week"); // "week" | "day"
-  const [localPresences, setLocalPresences] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [inscriptionSlot, setInscriptionSlot] = useState(null); // { slotId, dateStr }
-  const [addEleve, setAddEleve] = useState("");
-  const [addType, setAddType] = useState("abonne");
-  const [arretModal, setArretModal] = useState(null); // { st, slot }
-  const [validatingSlot, setValidatingSlot] = useState(null); // slot with students
-
-
-  const dayName = useMemo(() => JOURS_SEMAINE[new Date(selectedDate + "T12:00:00").getDay()], [selectedDate]);
-  const dateCtx = useMemo(() => getDateContext(selectedDate), [selectedDate]);
-  const dow = new Date(selectedDate + "T12:00:00").getDay();
-
-  const isCoursDay = useMemo(() => {
-    if (dateCtx.type === "samedi_milieu") return false;
-    if (dateCtx.type === "vacances") return dow >= 1 && dow <= 5;
-    return dow >= 1 && dow <= 6;
-  }, [dateCtx, dow]);
-
-  const loadPresences = useCallback(async () => { const d = await api.get("presences", `date_cours=eq.${selectedDate}`); setLocalPresences(d||[]); }, [selectedDate]);
-  useEffect(() => { loadPresences(); }, [loadPresences]);
-
-  const daySlots = useMemo(() => {
-    let rel;
-    if (dateCtx.type === "vacances") {
-      rel = creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === dateCtx.vacance?.id && (cr.semaine_vacances === dateCtx.semaine || cr.semaine_vacances === null));
-    } else {
-      rel = creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dayName);
-    }
-    return rel.map(cr => {
-      const assigned = affectations.filter(a => a.creneau_id === cr.id && a.actif);
-      const students = assigned.map(a => {
-        if (a.date_debut && a.date_debut > selectedDate) return null;
-        if (a.date_fin && a.date_fin < selectedDate) return null;
-        if (cr.type_creneau === "stage" && a.jours_stage && !a.jours_stage.includes(dayName)) return null;
-        if (a.type_inscription === "occasionnel" && a.dates_occasion && !a.dates_occasion.split(",").includes(selectedDate)) return null;
-        const el = eleves.find(e => e.id === a.eleve_id); const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id); return el ? { ...el, type_inscription: a.type_inscription, presence: pres, affectation_id: a.id, jours_stage: a.jours_stage, heures_defaut: a.heures_defaut || null, dates_occasion: a.dates_occasion || null } : null;
-      }).filter(Boolean);
-      return { ...cr, students, dur: slotDur(cr) };
-    });
-  }, [creneaux, affectations, eleves, dayName, localPresences, dateCtx]);
-
-  const markPresent = async (eid, cid, h) => { setSaving(true); await api.post("presences", { eleve_id: eid, date_cours: selectedDate, creneau_id: cid, statut: "present", heures: h }); await loadPresences(); setSaving(false); };
-  const markAbsent = async (eid, cid, m) => { setSaving(true); await api.post("presences", { eleve_id: eid, date_cours: selectedDate, creneau_id: cid, statut: m, heures: 0 }); await loadPresences(); setSaving(false); };
-  const removePresence = async (pid) => { await api.del("presences", `id=eq.${pid}`); await loadPresences(); };
-  const markAllPresent = async (slot) => { setSaving(true); for (const st of slot.students) { if (!st.presence) await api.post("presences", { eleve_id: st.id, date_cours: selectedDate, creneau_id: slot.id, statut: "present", heures: st.heures_defaut || slot.dur }); } await loadPresences(); setSaving(false); };
-  const adjustDuration = async (pid, newH) => { if (newH < 0.5) return; await api.patch("presences", `id=eq.${pid}`, { heures: newH }); await loadPresences(); };
-  const handleArretDefinitif = async (eleveId, creneauId) => { await api.patch("affectations_creneaux", `eleve_id=eq.${eleveId}&creneau_id=eq.${creneauId}&actif=eq.true`, { actif: false }); setArretModal(null); refresh(); };
-  const openInscriptionSlot = useCallback((slot, dateStr) => {
-    setInscriptionSlot({ slotId: slot.id, dateStr });
-    setAddEleve("");
-    setAddType("abonne");
-  }, []);
-
-  const inscribeInManageModal = async () => {
-    if (!addEleve || !inscriptionSlot) return;
-    const slotId = inscriptionSlot.slotId;
+  const inscribe = async () => {
+    if (!addEleve || !selectedSlot || saving) return;
+    setSaving(true);
+    const { slot, dateStr } = selectedSlot;
     const eleveId = Number(addEleve);
-    // Tenter de réactiver une ligne inactive existante (évite les erreurs de contrainte unique)
     const reactivated = await api.patch("affectations_creneaux",
-      `eleve_id=eq.${eleveId}&creneau_id=eq.${slotId}&actif=eq.false`,
+      `eleve_id=eq.${eleveId}&creneau_id=eq.${slot.id}&actif=eq.false`,
       { actif: true, type_inscription: addType });
     if (!reactivated || reactivated.length === 0) {
-      // Aucune ligne inactive — créer une nouvelle inscription
-      const created = await api.post("affectations_creneaux", { eleve_id: eleveId, creneau_id: slotId, type_inscription: addType, actif: true });
-      if (!created) return;
+      const created = await api.post("affectations_creneaux", { eleve_id: eleveId, creneau_id: slot.id, type_inscription: addType, actif: true });
+      if (!created) { setSaving(false); return; }
     }
-    // PATCH séparé pour les champs optionnels (échoue silencieusement si colonne absente)
-    const patches = { date_debut: inscriptionSlot.dateStr };
-    if (addType === "occasionnel") patches.dates_occasion = inscriptionSlot.dateStr;
-    await api.patch("affectations_creneaux", `eleve_id=eq.${eleveId}&creneau_id=eq.${slotId}&actif=eq.true`, patches);
+    if (addType === "occasionnel") {
+      await api.patch("affectations_creneaux",
+        `eleve_id=eq.${eleveId}&creneau_id=eq.${slot.id}&actif=eq.true`,
+        { dates_occasion: dateStr });
+    }
     setAddEleve("");
     setAddType("abonne");
-    setInscriptionSlot(null);
+    setSaving(false);
     await refresh();
-    await loadPresences();
   };
 
-  const handleRetirer = async (st, dateStr) => {
-    if (st.type_inscription === "occasionnel") {
-      await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { actif: false });
+  const togglePresence = async (st, dateStr) => {
+    if (st.presence) {
+      const newStatut = st.presence.statut === "present" ? "absent_non_justifie" : "present";
+      await api.patch("presences", `id=eq.${st.presence.id}`, { statut: newStatut, heures: newStatut === "present" ? slotDur(currentData) : 0 });
     } else {
-      // date_fin = dernier jour actif (colonne optionnelle) ; fallback actif=false si absent
-      const ok = await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { date_fin: dateStr });
-      if (!ok) await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { actif: false });
+      await api.post("presences", { eleve_id: st.id, creneau_id: selectedSlot.slot.id, date_cours: dateStr, statut: "present", heures: slotDur(currentData) });
+    }
+    await reloadDate(dateStr);
+  };
+
+  const markAbsentJustifie = async (st, dateStr) => {
+    if (st.presence) {
+      await api.patch("presences", `id=eq.${st.presence.id}`, { statut: "absent_justifie", heures: 0 });
+    } else {
+      await api.post("presences", { eleve_id: st.id, creneau_id: selectedSlot.slot.id, date_cours: dateStr, statut: "absent_justifie", heures: 0 });
+    }
+    await reloadDate(dateStr);
+  };
+
+  const markAllPresent = async (dateStr) => {
+    if (!currentData) return;
+    for (const st of currentData.students) {
+      if (!st.presence) {
+        await api.post("presences", { eleve_id: st.id, creneau_id: selectedSlot.slot.id, date_cours: dateStr, statut: "present", heures: slotDur(currentData) });
+      }
+    }
+    await reloadDate(dateStr);
+  };
+
+  const retirer = async (st, dateStr) => {
+    if (!window.confirm(`Retirer ${st.prenom} ${st.nom} de ce créneau ?`)) return;
+    if (st.type_inscription === "occasionnel" && st.dates_occasion) {
+      const newDates = st.dates_occasion.split(",").map(d => d.trim()).filter(d => d !== dateStr);
+      if (newDates.length > 0) {
+        await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { dates_occasion: newDates.join(",") });
+      } else {
+        await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { actif: false });
+      }
+    } else {
+      await api.patch("affectations_creneaux", `id=eq.${st.affectation_id}`, { actif: false });
     }
     await refresh();
   };
 
-  const stats = useMemo(() => { let t=0,p=0,a=0,pe=0; daySlots.forEach(s => s.students.forEach(st => { t++; if(st.presence){st.presence.statut==="present"?p++:a++;}else pe++; })); return { t,p,a,pe }; }, [daySlots]);
-
-  const moveDate = (dir) => { const d = new Date(selectedDate); d.setDate(d.getDate()+dir); setSelectedDate(d.toISOString().split("T")[0]); };
-  const moveWeek = (dir) => { const d = new Date(selectedDate); d.setDate(d.getDate()+dir*7); setSelectedDate(d.toISOString().split("T")[0]); };
-  const ctxColor = dateCtx.type==="vacances"?C.orange:dateCtx.type==="samedi_milieu"?C.textDim:C.accent;
-  const ctxLabel = dateCtx.type==="vacances"?`🏖️ Vacances ${dateCtx.vacance.label} — Semaine ${dateCtx.semaine}`:dateCtx.type==="samedi_milieu"?"😴 Samedi milieu — pas de cours":"📚 Période scolaire";
+  const today = todayStr();
 
   return (
     <div>
-      {/* Header */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:12 }}><span style={{ fontSize:26 }}>📋</span><h2 style={{ fontSize:22, fontWeight:800, color:C.text, margin:0 }}>Planning — Appel</h2></div>
-        {/* Toggle Vue */}
-        <div style={{ display:"flex", gap:4, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}` }}>
-          {[["week","📅 Semaine"],["day","📋 Jour"]].map(([k,l]) => (
-            <button key={k} onClick={() => setViewMode(k)} style={{ padding:"7px 16px", borderRadius:8, border:"none", cursor:"pointer", background:viewMode===k?C.accent:"transparent", color:viewMode===k?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>{l}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* Barre de navigation */}
-      <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:16, flexWrap:"wrap" }}>
-        <Btn small onClick={() => viewMode==="week" ? moveWeek(-1) : moveDate(-1)} color={C.textMuted} outline>{viewMode==="week"?"◀◀":"◀"}</Btn>
-        <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} style={{ padding:"10px 16px", background:C.surface, border:`2px solid ${C.border}`, borderRadius:10, color:C.text, fontSize:15, fontWeight:600 }} />
-        <Btn small onClick={() => viewMode==="week" ? moveWeek(1) : moveDate(1)} color={C.textMuted} outline>{viewMode==="week"?"▶▶":"▶"}</Btn>
-        <Btn small onClick={() => setSelectedDate(todayStr())} color={C.accent} outline>Aujourd'hui</Btn>
-        {viewMode==="day" && <Badge color={isCoursDay?C.accent:C.textDim}>{dayName}</Badge>}
-        {saving && <span style={{ fontSize:13, color:C.warning }}>⏳ Enregistrement...</span>}
-      </div>
-
-      {/* Vue Semaine */}
-      {viewMode === "week" && (
-        <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:16, padding:20, boxShadow:"0 2px 8px rgba(0,0,0,0.04)", marginBottom:20 }}>
-          <WeekView
-            creneaux={creneaux}
-            affectations={affectations}
-            presences={localPresences}
-            baseDate={selectedDate}
-            onDayClick={(date) => { setSelectedDate(date); setViewMode("day"); }}
-            onWeekChange={(date) => setSelectedDate(date)}
-            onSlotClick={(slot, date) => { setSelectedDate(date); setViewMode("day"); openInscriptionSlot(slot, date); }}
-          />
-        </div>
-      )}
-
-      {/* Vue Jour */}
-      {viewMode === "day" && <>
-        <div style={{ background:ctxColor+"15", border:`2px solid ${ctxColor}44`, borderRadius:10, padding:"10px 16px", marginBottom:16, fontSize:14, color:ctxColor, fontWeight:700 }}>{ctxLabel}</div>
-
-        {isCoursDay && daySlots.length > 0 && (
-          <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
-            <Badge color={C.text}>{stats.t} élèves</Badge><Badge color={C.success}>✓ {stats.p}</Badge><Badge color={C.danger}>✗ {stats.a}</Badge>
-            {stats.pe > 0 && <Badge color={C.warning}>⏳ {stats.pe}</Badge>}
+      {/* Header nav semaine */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, color: C.text, margin: 0 }}>Planning / Appel</h1>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Btn onClick={() => navigate(-1)} color={C.accent} outline>← Sem. préc.</Btn>
+          <div style={{ textAlign: "center", minWidth: 150 }}>
+            <div style={{ fontWeight: 800, fontSize: 18, color: C.text }}>S{weekNum}</div>
+            <div style={{ fontSize: 12, color: C.textMuted }}>{fmtDateFr(weekDates[0])} – {fmtDateFr(weekDates[weekDates.length - 1])}</div>
           </div>
-        )}
+          <Btn onClick={() => navigate(1)} color={C.accent} outline>Sem. suiv. →</Btn>
+          <Btn onClick={() => { setWeekStart(getWeekDates(today)[0]); setSelectedSlot(null); }} color={C.pink} small>Aujourd'hui</Btn>
+        </div>
+      </div>
 
-      {!isCoursDay ? (
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ fontSize: 50, marginBottom: 12 }}>😴</div>
-          <div style={{ color: C.textMuted, fontSize: 15 }}>Pas de cours le {dayName}{dateCtx.type==="samedi_milieu"?" (milieu vacances)":""}</div>
-        </div>
-      ) : daySlots.length === 0 ? (
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ fontSize: 50, marginBottom: 12 }}>{dateCtx.type==="vacances"?"🏕️":"📅"}</div>
-          <div style={{ color: C.textMuted, fontSize: 15 }}>Aucun créneau {dateCtx.type==="vacances"?`vacances (${dateCtx.vacance.label} S${dateCtx.semaine})`:"régulier"} pour {dayName}</div>
-          <div style={{ color: C.textDim, fontSize: 13, marginTop: 8 }}>Créez-en depuis la page Créneaux</div>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {daySlots.map(slot => {
-            const allDone = slot.students.length > 0 && slot.students.every(st => st.presence);
-            const tarif = tarifMode(slot.mode);
-            const absJustifies = slot.students.filter(st => st.presence?.statut === "absent_justifie").length;
-            const effectiveCount = slot.students.length - absJustifies;
-            const placesLibres = Math.max(0, slot.capacite - effectiveCount);
-            return (
-                <div key={slot.id} style={{ background: C.surface, border: `2px solid ${allDone?C.success:C.border}`, borderRadius: 16, padding: 18, borderLeft: `5px solid ${allDone?C.success:dateCtx.type==="vacances"?C.orange:C.accent}`, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap:"wrap", gap:8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap:"wrap" }}>
-                      <span style={{ fontWeight: 800, fontSize: 18, color: C.text }}>{(slot.heure_debut||"").substring(0,5)} — {(slot.heure_fin||"").substring(0,5)}</span>
-                      <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarif}€/h</Badge>
-                      <Badge color={C.textMuted}>{effectiveCount}/{slot.capacite}</Badge>
-                      {slot.type_creneau==="stage" && <Badge color={C.orange}>🏖️ Vacances S{slot.semaine_vacances} · {dayName}</Badge>}
-                      {absJustifies > 0 && <Badge color={C.warning}>💬 {absJustifies} absent{absJustifies>1?"s":""} prévenu{absJustifies>1?"s":""}</Badge>}
-                      {placesLibres > 0 && <Badge color={C.success}>🟢 {placesLibres} place{placesLibres>1?"s":""} libre{placesLibres>1?"s":""}</Badge>}
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      {!allDone && slot.students.length > 0 && <Btn small color={C.success} onClick={() => markAllPresent(slot)} title="Tous présents">✓ Tous</Btn>}
-                      {effectiveCount < slot.capacite && <Btn small color={C.purple} outline onClick={() => openInscriptionSlot(slot, selectedDate)}>+ Élève</Btn>}
-                      {allDone && slot.students.length > 0 && (
-                        <Btn small color={C.success} onClick={() => setValidatingSlot({ ...slot })} title="Valider la séance et générer la facturation">
-                          💶 Valider & Facturer
-                        </Btn>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    {slot.students.map(st => {
-                      const p = st.presence;
-                      const isP = p && p.statut === "present";
-                      const isAJ = p && p.statut === "absent_justifie";
-                      const isANJ = p && p.statut === "absent_non_justifie";
-                      const hrs = p ? parseFloat(p.heures||0) : slot.dur;
-                      const montant = tarif * hrs;
-                      const rowBg = isP ? C.success+"12" : isAJ ? C.warning+"12" : isANJ ? C.danger+"12" : C.surfaceLight;
-                      const rowBorder = isP ? C.success+"44" : isAJ ? C.warning+"44" : isANJ ? C.danger+"44" : C.border;
-                      return (
-                        <div key={st.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, background: rowBg, border: `2px solid ${rowBorder}` }}>
-                          {/* Infos élève */}
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap:"wrap" }}>
-                            <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>
-                            {st.jours_stage && st.jours_stage.split(",").length < 5 && <span style={{ fontSize: 10, color: C.orange, fontWeight: 600 }}>{st.jours_stage.split(",").length}j</span>}
-                            {st.type_inscription==="occasionnel" && <Badge color={C.warning}>⚡ Occ.{st.dates_occasion ? ` (${st.dates_occasion.split(",").length}×)` : ""}</Badge>}
-                            {st.heures_defaut && st.heures_defaut !== slot.dur && <Badge color={C.purple}>{st.heures_defaut}h</Badge>}
-                            <span style={{ fontSize: 11, color: C.textDim }}>{st.classe}</span>
-                            {/* Arrêt définitif */}
-                            {!p && st.type_inscription !== "occasionnel" && (
-                              <button onClick={() => setArretModal({ st, slot })} title="Arrêt définitif — libère la place permanently" style={{ background: C.danger+"15", border: `1px solid ${C.danger}33`, color: C.danger, cursor: "pointer", fontSize: 10, padding: "2px 7px", borderRadius: 6, fontWeight: 700 }}>🚪 Arrêt</button>
-                            )}
-                          </div>
-                          {/* Actions / Statut */}
-                          <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink:0 }}>
-                            {p ? (
-                              <>
-                                {/* Présent : afficher durée ajustable */}
-                                {isP && (
-                                  <div style={{ display:"flex", alignItems:"center", gap:4 }}>
-                                    <button onClick={() => adjustDuration(p.id, Math.round((hrs-0.5)*2)/2)} style={{ background:C.surfaceLight, border:`1px solid ${C.border}`, color:C.text, cursor:"pointer", width:24, height:24, borderRadius:6, fontWeight:700, fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
-                                    <span style={{ fontSize:13, fontWeight:700, color:C.success, minWidth:32, textAlign:"center" }}>{hrs}h</span>
-                                    <button onClick={() => adjustDuration(p.id, Math.round((hrs+0.5)*2)/2)} style={{ background:C.surfaceLight, border:`1px solid ${C.border}`, color:C.text, cursor:"pointer", width:24, height:24, borderRadius:6, fontWeight:700, fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
-                                    <span style={{ fontSize:12, fontWeight:700, color:C.success, marginLeft:2 }}>{montant.toFixed(0)}€</span>
-                                  </div>
-                                )}
-                                {/* Absent justifié */}
-                                {isAJ && (
-                                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                                    <Badge color={C.warning}>🏥 Prévenu</Badge>
-                                    <span style={{ fontSize:11, color:C.warning, fontWeight:600 }}>Non facturé</span>
-                                    <Badge color={C.blue}>💬 Place provisoire</Badge>
-                                  </div>
-                                )}
-                                {/* Absent non justifié */}
-                                {isANJ && (
-                                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                                    <Badge color={C.danger}>❌ Non prévenu</Badge>
-                                    <span style={{ fontSize:11, color:C.danger, fontWeight:600 }}>Facturé {(tarif*slot.dur).toFixed(0)}€</span>
-                                  </div>
-                                )}
-                                <button onClick={() => removePresence(p.id)} title="Annuler le statut" style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, fontSize: 12, cursor: "pointer", padding: "4px 8px", borderRadius: 6 }}>↩</button>
-                              </>
-                            ) : (
-                              <>
-                                <Btn small onClick={() => markPresent(st.id, slot.id, st.heures_defaut || slot.dur)} color={C.success} title="Présent — facturé">✓ Présent</Btn>
-                                <Btn small onClick={() => markAbsent(st.id, slot.id, "absent_justifie")} color={C.warning} outline title="Absent prévenu — non facturé, place provisoire">🏥 Prévenu</Btn>
-                                <Btn small onClick={() => markAbsent(st.id, slot.id, "absent_non_justifie")} color={C.danger} outline title="Absent non prévenu — facturé quand même">❌ Non prévenu</Btn>
-                              </>
-                            )}
-                          </div>
-                        </div>);
-                    })}
-                  </div>
-                  {slot.students.length === 0 && <div style={{ textAlign: "center", padding: 20, color: C.textDim, fontSize: 13 }}>Créneau vide — cliquez + Élève pour inscrire</div>}
-                </div>
-            );
-          })}
-        </div>
-      )}
-      </>}
-
-      {/* ── Modal gestion inscription ── */}
-      <Modal open={!!inscriptionSlot} onClose={() => { setInscriptionSlot(null); setAddEleve(""); setAddType("abonne"); }} title={(() => { const s = inscriptionSlot ? daySlots.find(x => x.id === inscriptionSlot.slotId) : null; return s ? `${s.jour||"Lun→Ven"} ${(s.heure_debut||"").substring(0,5)}–${(s.heure_fin||"").substring(0,5)} — ${fmtDateFr(inscriptionSlot.dateStr)}` : "Gestion inscription"; })()}>
-        {inscriptionSlot && (() => {
-          const slot = daySlots.find(s => s.id === inscriptionSlot.slotId);
-          if (!slot) return <div style={{ color:C.textDim, padding:20, textAlign:"center" }}>Créneau introuvable pour cette date.</div>;
-          const effCount = slot.students.filter(st => st.presence?.statut !== "absent_justifie").length;
-          const isFull = slot.capacite != null && effCount >= slot.capacite;
-          // Exclure tous les élèves avec une affectation active sur ce créneau (pas seulement ceux du jour)
-          const allSlotAffIds = affectations.filter(a => a.creneau_id === slot.id && a.actif).map(a => a.eleve_id);
-          const availableEleves = eleves.filter(e => e.actif && !allSlotAffIds.includes(e.id));
-          return (<div>
-            {/* Section inscrits */}
-            <div style={{ marginBottom:20 }}>
-              <div style={{ fontSize:12, fontWeight:700, color:C.textMuted, marginBottom:10, textTransform:"uppercase" }}>Inscrits ce jour — {effCount}/{slot.capacite}</div>
-              {slot.students.length === 0
-                ? <div style={{ color:C.textDim, fontSize:13, padding:"16px 0", textAlign:"center" }}>Aucun élève inscrit</div>
-                : slot.students.map(st => {
-                    const hasP = !!st.presence;
-                    const isAJ = st.presence?.statut === "absent_justifie";
+      {/* Grille semaine */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10, marginBottom: 24 }}>
+        {weekDates.map(dateStr => {
+          const dow = new Date(dateStr + "T12:00:00").getDay();
+          const isToday = dateStr === today;
+          const slots = getCreneauxForDate(dateStr);
+          const ctx = getDateContext(dateStr);
+          return (
+            <div key={dateStr}>
+              <div style={{ background: isToday ? C.accent : C.surfaceLight, color: isToday ? "#fff" : C.text, borderRadius: 10, padding: "8px 10px", marginBottom: 8, textAlign: "center" }}>
+                <div style={{ fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>{JOURS_SEMAINE[dow].substring(0, 3)}</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{fmtDateFr(dateStr)}</div>
+                {ctx.type === "vacances" && <div style={{ fontSize: 10, marginTop: 2, opacity: 0.8 }}>🏕️ Vacances</div>}
+              </div>
+              {slots.length === 0
+                ? <div style={{ fontSize: 11, color: C.textDim, textAlign: "center", padding: "8px 0" }}>—</div>
+                : slots.map(slot => {
+                    const col = slot.pct >= 1 ? C.danger : slot.pct >= 0.7 ? C.warning : C.success;
+                    const isSelected = selectedSlot?.slot.id === slot.id && selectedSlot?.dateStr === dateStr;
                     return (
-                      <div key={st.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 14px", borderRadius:10, background:isAJ?C.warning+"12":C.surfaceLight, border:`1px solid ${isAJ?C.warning+"44":C.border}`, marginBottom:6 }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-                          <span style={{ fontWeight:700, fontSize:14, color:C.text }}>{st.prenom} {st.nom}</span>
+                      <div key={slot.id}
+                        onClick={() => { setSelectedSlot({ slot, dateStr }); setAddEleve(""); setAddType("abonne"); }}
+                        style={{ background: isSelected ? col + "22" : C.surface, border: `2px solid ${col}${isSelected ? "" : "77"}`, borderRadius: 8, padding: "8px 10px", marginBottom: 6, cursor: "pointer", transition: "all 0.15s" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{(slot.heure_debut || "").substring(0, 5)}–{(slot.heure_fin || "").substring(0, 5)}</div>
+                        <div style={{ fontSize: 11, color: col, fontWeight: 600, marginTop: 2 }}>{slot.effCount}/{slot.capacite || "?"}</div>
+                        {slot.students.some(s => s.presence) && <div style={{ fontSize: 10, color: C.success, marginTop: 1 }}>✓ appel</div>}
+                      </div>
+                    );
+                  })}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Panel détail créneau */}
+      {selectedSlot && currentData && (() => {
+        const { dateStr } = selectedSlot;
+        const slot = currentData;
+        const isFull = slot.capacite != null && slot.effCount >= slot.capacite;
+        return (
+          <div style={{ background: C.surface, border: `2px solid ${C.border}`, borderRadius: 16, padding: 24, boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+              <div>
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: C.text, margin: "0 0 4px" }}>
+                  {slot.jour || "Stage"} · {(slot.heure_debut || "").substring(0, 5)}–{(slot.heure_fin || "").substring(0, 5)}
+                </h2>
+                <div style={{ fontSize: 13, color: C.textMuted }}>
+                  {new Date(dateStr + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
+                  {" · "}{slot.effCount}/{slot.capacite || "?"} place(s) · <span style={{ color: FORFAITS[slot.mode]?.c || C.blue }}>{FORFAITS[slot.mode]?.l || slot.mode}</span>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {slot.students.length > 0 && <Btn small color={C.success} outline onClick={() => markAllPresent(dateStr)}>✓ Tout présent</Btn>}
+                <Btn small outline color={C.textMuted} onClick={() => setSelectedSlot(null)}>✕ Fermer</Btn>
+              </div>
+            </div>
+
+            {/* Liste élèves */}
+            <div style={{ marginBottom: 20 }}>
+              {slot.students.length === 0
+                ? <div style={{ color: C.textDim, textAlign: "center", padding: "20px 0", background: C.surfaceLight, borderRadius: 10 }}>Aucun élève inscrit pour cette séance</div>
+                : slot.students.map(st => {
+                    const isAJ = st.presence?.statut === "absent_justifie";
+                    const isPresent = st.presence?.statut === "present";
+                    const isANJ = st.presence?.statut === "absent_non_justifie";
+                    const presColor = isPresent ? C.success : isANJ ? C.danger : C.textDim;
+                    const presLabel = isPresent ? "✓ Présent" : isANJ ? "✗ Absent" : "⬜ Appel ?";
+                    return (
+                      <div key={st.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderRadius: 10, marginBottom: 6, background: isAJ ? C.warning + "10" : C.surfaceLight, border: `1px solid ${isAJ ? C.warning + "55" : C.border}` }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>
                           <Badge color={C.purple}>{st.classe}</Badge>
-                          {st.type_inscription==="occasionnel" && <Badge color={C.warning}>⚡ Occ.</Badge>}
-                          {isAJ && <Badge color={C.warning}>🏥 Absent ce jour</Badge>}
-                          {st.presence?.statut==="present" && <Badge color={C.success}>✓ Présent</Badge>}
-                          {st.presence?.statut==="absent_non_justifie" && <Badge color={C.danger}>✗ Non prévenu</Badge>}
+                          {st.type_inscription === "occasionnel" && <Badge color={C.warning}>⚡ Occ.</Badge>}
+                          {isAJ && <Badge color={C.warning}>📅 Absent ce jour</Badge>}
                         </div>
-                        <div style={{ display:"flex", gap:6, flexShrink:0 }}>
-                          {!hasP && st.type_inscription!=="occasionnel" && (
-                            <button onClick={() => markAbsent(st.id, slot.id, "absent_justifie")} style={{ background:C.warning+"15", border:`1px solid ${C.warning}44`, color:C.warning, cursor:"pointer", fontSize:11, padding:"4px 10px", borderRadius:6, fontWeight:700 }}>📅 Absent ce jour</button>
-                          )}
-                          {!hasP && (
-                            <button onClick={() => handleRetirer(st, inscriptionSlot.dateStr)} style={{ background:C.danger+"15", border:"none", color:C.danger, cursor:"pointer", fontSize:11, padding:"4px 10px", borderRadius:6, fontWeight:700 }}>🚪 Retirer</button>
-                          )}
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {isAJ
+                            ? <Btn small outline color={C.accent} onClick={() => togglePresence(st, dateStr)}>↩ Présent</Btn>
+                            : (<>
+                                <button onClick={() => togglePresence(st, dateStr)} style={{ padding: "4px 10px", borderRadius: 6, border: `2px solid ${presColor}`, background: presColor + "15", color: presColor, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>{presLabel}</button>
+                                <Btn small outline color={C.warning} title="Absent ce jour — libère la place" onClick={() => markAbsentJustifie(st, dateStr)}>📅</Btn>
+                              </>)}
+                          <Btn small outline color={C.danger} title="Retirer définitivement" onClick={() => retirer(st, dateStr)}>🚪</Btn>
                         </div>
                       </div>
                     );
                   })}
             </div>
+
             {/* Section inscription */}
-            <div style={{ borderTop:`2px solid ${C.border}`, paddingTop:16 }}>
-              <div style={{ fontSize:12, fontWeight:700, color:C.textMuted, marginBottom:12, textTransform:"uppercase" }}>Inscrire un élève</div>
+            <div style={{ borderTop: `2px solid ${C.border}`, paddingTop: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 14, textTransform: "uppercase", letterSpacing: 1 }}>Inscrire un élève</div>
               {isFull
-                ? <div style={{ background:C.danger+"15", border:`2px solid ${C.danger}44`, borderRadius:10, padding:"12px 16px", textAlign:"center", fontWeight:700, fontSize:14, color:C.danger }}>🚫 Créneau complet ({effCount}/{slot.capacite} places)</div>
-                : (<>
-                    <Input label="Élève" value={addEleve} onChange={setAddEleve} options={[["","— Choisir —"],...availableEleves.sort((a,b)=>a.nom.localeCompare(b.nom)).map(e=>[e.id,`${e.prenom} ${e.nom} (${e.classe})`])]} />
-                    <Input label="Type" value={addType} onChange={setAddType} options={[["abonne","🔄 Abonné (toutes les semaines suivantes)"],["occasionnel","⚡ Occasionnel (cette séance uniquement)"]]} />
-                    <div style={{ background:addType==="abonne"?C.accent+"12":C.warning+"12", border:`1px solid ${addType==="abonne"?C.accent:C.warning}33`, borderRadius:8, padding:"8px 12px", marginBottom:14, fontSize:12, color:addType==="abonne"?C.accent:C.warning }}>
-                      {addType==="abonne" ? `✓ Inscrit à partir du ${fmtDateFr(inscriptionSlot.dateStr)}, chaque semaine` : `⚡ Inscrit uniquement pour la séance du ${fmtDateFr(inscriptionSlot.dateStr)}`}
-                    </div>
-                    <div style={{ display:"flex", justifyContent:"flex-end" }}>
-                      <Btn onClick={inscribeInManageModal} disabled={!addEleve} color={C.success}>+ Inscrire</Btn>
-                    </div>
-                  </>)}
-            </div>
-          </div>);
-        })()}
-      </Modal>
-
-      <ValidationSeanceModal
-        open={!!validatingSlot}
-        onClose={() => setValidatingSlot(null)}
-        slot={validatingSlot}
-        dateStr={selectedDate}
-        students={validatingSlot ? (daySlots.find(s => s.id === validatingSlot.id)?.students || []) : []}
-        suiviMensuel={suiviMensuel}
-        refresh={() => { refresh(); loadPresences(); }}
-      />
-
-      {/* Modal Arrêt définitif */}
-      <Modal open={!!arretModal} onClose={() => setArretModal(null)} title="🚪 Arrêt définitif">
-        {arretModal && (
-          <div>
-            <div style={{ background: C.danger+"10", border: `2px solid ${C.danger}33`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: C.text, marginBottom: 6 }}>{arretModal.st.prenom} {arretModal.st.nom}</div>
-              <div style={{ fontSize: 13, color: C.textMuted }}>Créneau : {arretModal.slot.jour || "Lun→Ven"} {(arretModal.slot.heure_debut||"").substring(0,5)}–{(arretModal.slot.heure_fin||"").substring(0,5)}</div>
-            </div>
-            <div style={{ fontSize: 14, color: C.text, marginBottom: 8 }}>
-              Confirmer l'arrêt définitif de cet élève dans ce créneau ?
-            </div>
-            <div style={{ background: C.warning+"15", border: `1px solid ${C.warning}44`, borderRadius: 10, padding: 12, marginBottom: 20, fontSize: 13, color: C.warning, fontWeight: 600 }}>
-              ⚠️ La place sera libérée définitivement et disponible pour un autre élève.
-            </div>
-            <div style={{ display:"flex", justifyContent:"flex-end", gap:10 }}>
-              <Btn onClick={() => setArretModal(null)} color={C.textMuted} outline>Annuler</Btn>
-              <Btn onClick={() => handleArretDefinitif(arretModal.st.id, arretModal.slot.id)} color={C.danger}>🚪 Confirmer l'arrêt</Btn>
+                ? <div style={{ background: C.danger + "15", border: `2px solid ${C.danger}44`, borderRadius: 10, padding: "14px 18px", textAlign: "center", fontWeight: 700, color: C.danger }}>🚫 Créneau complet — {slot.effCount}/{slot.capacite} places occupées</div>
+                : availableEleves.length === 0
+                  ? <div style={{ color: C.textDim, textAlign: "center", fontSize: 13, padding: "8px 0" }}>Tous les élèves actifs sont déjà inscrits dans ce créneau.</div>
+                  : (<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, alignItems: "flex-end" }}>
+                      <Input label="Élève" value={addEleve} onChange={setAddEleve}
+                        options={[["", "— Choisir —"], ...availableEleves.sort((a, b) => a.nom.localeCompare(b.nom)).map(e => [e.id, `${e.prenom} ${e.nom} (${e.classe})`])]} />
+                      <Input label="Type" value={addType} onChange={setAddType}
+                        options={[["abonne", "🔄 Abonné (toutes les semaines)"], ["occasionnel", "⚡ Occasionnel (ce jour seulement)"]]} />
+                      <div style={{ marginBottom: 14 }}>
+                        <Btn onClick={inscribe} disabled={!addEleve || saving} color={C.success}>
+                          {saving ? "⏳ ..." : "+ Inscrire"}
+                        </Btn>
+                      </div>
+                    </div>)}
             </div>
           </div>
-        )}
-      </Modal>
+        );
+      })()}
     </div>
   );
 };
-
 // ═══ ÉLÈVES ═══
 const ElevesPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, presences, refresh, initialAction, initialOpenId }) => {
   const [search, setSearch] = useState(""); const [filterClasse, setFilterClasse] = useState("all"); const [filterStatut, setFilterStatut] = useState("actif");
@@ -1317,306 +772,176 @@ const ElevesPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, p
 };
 
 // ═══ CRÉNEAUX ═══
-const CreneauxPage = ({ creneaux, affectations, eleves, refresh }) => {
-  const [tab, setTab] = useState("regulier");
+const CreneauxPage = ({ creneaux, affectations, refresh }) => {
+  const [modal, setModal] = useState(false);
   const [editCr, setEditCr] = useState(null);
-  const [newOpen, setNewOpen] = useState(false);
-
-  const reguliers = creneaux.filter(cr => (cr.type_creneau||"regulier")==="regulier");
-  const stages = creneaux.filter(cr => cr.type_creneau==="stage");
-
-  const daysReg = useMemo(() => [...new Set(reguliers.map(cr => cr.jour))].sort((a,b) => JOURS_ALL.indexOf(a)-JOURS_ALL.indexOf(b)), [reguliers]);
-  const groupedReg = useMemo(() => { const g = {}; daysReg.forEach(d => g[d]=[]); reguliers.forEach(cr => { if(g[cr.jour]) { const studentCount = affectations.filter(a => a.creneau_id===cr.id && a.actif).length; g[cr.jour].push({...cr,studentCount}); } }); return g; }, [reguliers, affectations, daysReg]);
-
-  const groupedStage = useMemo(() => { const g = {}; stages.forEach(cr => { const pk = `${cr.periode_vacances}_S${cr.semaine_vacances||1}`; if(!g[pk]) g[pk] = { periode: cr.periode_vacances, semaine: cr.semaine_vacances||1, slots: [] }; const studentCount = affectations.filter(a => a.creneau_id===cr.id && a.actif).length; g[pk].slots.push({...cr,studentCount}); }); return g; }, [stages, affectations]);
-
-  const deleteCreneau = async (crId) => { if(confirm("Supprimer ce créneau ?")) { await api.del("affectations_creneaux",`creneau_id=eq.${crId}`); await api.del("creneaux",`id=eq.${crId}`); refresh(); } };
-
-  const SlotCard = ({ slot }) => (
-    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 10, borderLeft: `4px solid ${(FORFAITS[slot.mode]||{}).c||C.accent}`, boxShadow: "0 2px 6px rgba(0,0,0,0.04)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-        <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{(slot.heure_debut||"").substring(0,5)}-{(slot.heure_fin||"").substring(0,5)}</span>
-        <div style={{ display: "flex", gap: 6 }}>
-          <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"}</Badge>
-          <button onClick={() => setEditCr(slot)} title="Modifier" style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>✏️</button>
-          <button onClick={() => deleteCreneau(slot.id)} title="Supprimer" style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>🗑️</button>
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 3, marginBottom: 8 }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 4, borderRadius: 2, background: j<slot.studentCount?C.accent:C.surfaceLight }} />)}</div>
-      <div style={{ fontSize: 11, color: C.textDim }}>{slot.studentCount}/{slot.capacite}</div>
-    </div>
-  );
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 26 }}>📅</span><h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0 }}>Créneaux</h2></div>
-        <Btn onClick={() => setNewOpen(true)} color={C.success}>+ Nouveau créneau</Btn>
-      </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
-        {[["regulier",`📅 Réguliers (${reguliers.length})`],["stage",`🏕️ Stages (${stages.length})`]].map(([k,l]) => (
-          <div key={k} onClick={() => setTab(k)} style={{ padding: "10px 20px", borderRadius: 10, cursor: "pointer", border: `2px solid ${tab===k?(k==="stage"?C.orange:C.accent):C.border}`, background: tab===k?(k==="stage"?C.orange:C.accent)+"15":"transparent", color: tab===k?C.text:C.textMuted, fontWeight: 700, fontSize: 14 }}>{l}</div>
-        ))}
-      </div>
-      {tab==="regulier" ? (
-        daysReg.length===0 ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center", color: C.textDim }}>Aucun créneau régulier</div> :
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(daysReg.length,5)}, 1fr)`, gap: 18 }}>
-          {daysReg.map(day => (<div key={day}>
-            <div style={{ background: C.blue+"15", border: `2px solid ${C.blue}44`, borderRadius: 12, padding: 14, marginBottom: 12, textAlign: "center" }}><span style={{ fontSize: 16, fontWeight: 700, color: C.blue }}>{day}</span></div>
-            {(groupedReg[day]||[]).map(slot => <SlotCard key={slot.id} slot={slot} />)}
-          </div>))}
-        </div>
-      ) : (
-        Object.keys(groupedStage).length===0 ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center" }}><div style={{ fontSize: 50, marginBottom: 12 }}>🏕️</div><div style={{ color: C.textMuted }}>Aucun créneau de stage</div></div> :
-        Object.entries(groupedStage).sort(([a],[b]) => a.localeCompare(b)).map(([key, grp]) => {
-          const plabel = PERIODES.find(p => p[0]===grp.periode)?.[1]||grp.periode;
-          return (<div key={key} style={{ marginBottom: 24 }}>
-            <div style={{ background: C.orange+"15", border: `2px solid ${C.orange}44`, borderRadius: 12, padding: "10px 16px", marginBottom: 12, fontWeight: 700, color: C.orange, fontSize: 15 }}>{plabel} — Semaine {grp.semaine}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-              {grp.slots.map(slot => (
-                <div key={slot.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, borderLeft: `4px solid ${C.orange}`, boxShadow: "0 2px 6px rgba(0,0,0,0.04)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                    <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{(slot.heure_debut||"").substring(0,5)}-{(slot.heure_fin||"").substring(0,5)}</span>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Badge color={C.orange}>Lun→Ven</Badge>
-                      <button onClick={() => setEditCr(slot)} style={{ background: C.surfaceLight, border: `1px solid ${C.border}`, color: C.textMuted, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>✏️</button>
-                      <button onClick={() => deleteCreneau(slot.id)} style={{ background: C.danger+"15", border: "none", color: C.danger, cursor: "pointer", fontSize: 12, padding: "2px 6px", borderRadius: 4 }}>🗑️</button>
-                    </div>
-                  </div>
-                  <Badge color={(FORFAITS[slot.mode]||{}).c||C.accent}>{(FORFAITS[slot.mode]||{}).l||"Groupe"} · {tarifMode(slot.mode)}€/h</Badge>
-                  <div style={{ display: "flex", gap: 3, margin: "10px 0 6px" }}>{Array.from({length:slot.capacite}).map((_,j) => <div key={j} style={{ flex: 1, height: 4, borderRadius: 2, background: j<slot.studentCount?C.orange:C.surfaceLight }} />)}</div>
-                  <div style={{ fontSize: 11, color: C.textDim }}>{slot.studentCount}/{slot.capacite}</div>
-                </div>
-              ))}
-            </div>
-          </div>);
-        })
-      )}
-      <CreneauModal open={newOpen||!!editCr} onClose={() => { setNewOpen(false); setEditCr(null); }} creneau={editCr} creneaux={creneaux} refresh={refresh} />
-    </div>
-  );
-};
-
-// ═══ PAIEMENTS ═══
-const PaiementsPage = ({ eleves, paiements, refresh }) => {
-  const [payOpen, setPayOpen] = useState(false);
-  const sorted = useMemo(() => [...paiements].sort((a,b) => new Date(b.date_paiement)-new Date(a.date_paiement)), [paiements]);
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 26 }}>💳</span><h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0 }}>Paiements</h2><Badge color={C.accent}>{paiements.length}</Badge></div>
-        <Btn onClick={() => setPayOpen(true)} color={C.success}>+ Nouveau règlement</Btn>
-      </div>
-      {sorted.length===0 ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center" }}><div style={{ fontSize: 50, marginBottom: 12 }}>💰</div><div style={{ color: C.textMuted }}>Aucun paiement</div></div> :
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}><thead><tr style={{ borderBottom: `2px solid ${C.border}`, background: C.blue+"15" }}>{["Date","Élève","Montant","Mode","Mois","Note"].map((h,i) => <th key={i} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: C.blue, textTransform: "uppercase" }}>{h}</th>)}</tr></thead>
-            <tbody>{sorted.map(p => { const el = eleves.find(e => e.id===p.eleve_id); return (<tr key={p.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={{ padding: "10px 14px", fontSize: 13, color: C.textMuted }}>{new Date(p.date_paiement).toLocaleDateString("fr-FR")}</td>
-              <td style={{ padding: "10px 14px", fontSize: 14, fontWeight: 700, color: C.text }}>{el?`${el.prenom} ${el.nom}`:p.eleve_id}</td>
-              <td style={{ padding: "10px 14px", fontSize: 16, fontWeight: 800, color: C.success }}>{parseFloat(p.montant).toFixed(0)}€</td>
-              <td style={{ padding: "10px 14px" }}><Badge color={C.textMuted}>{p.mode_paiement}</Badge></td>
-              <td style={{ padding: "10px 14px", fontSize: 13, color: C.textMuted }}>{p.mois_concerne||"—"}</td>
-              <td style={{ padding: "10px 14px", fontSize: 13, color: C.textDim }}>{p.commentaire||"—"}</td>
-            </tr>); })}</tbody></table>
-        </div>}
-      <PaymentModal open={payOpen} onClose={() => setPayOpen(false)} eleves={eleves} preselectedEleve="" refresh={refresh} />
-    </div>
-  );
-};
-
-// ═══ MODAL INSCRIPTION PROSPECT ═══
-const InscriptionProspectModal = ({ open, onClose, slot, dateStr, eleves, affectations, refresh }) => {
-  const [mode, setMode] = useState("search"); // "search" | "new"
-  const [search, setSearch] = useState("");
-  const [selectedEleve, setSelectedEleve] = useState(null);
-  const [typeInscription, setTypeInscription] = useState("abonne");
+  const [form, setForm] = useState({ type: "groupe", jour: "Lundi", heure_debut: "16:00", heure_fin: "17:00", capacite: 6, tarif: 15, periode_vacances: "toussaint", semaine_vacances: 1 });
   const [saving, setSaving] = useState(false);
-  const [newForm, setNewForm] = useState({});
-  const [datesOccasion, setDatesOccasion] = useState([]);
+  const [conflictMsg, setConflictMsg] = useState("");
 
-  useEffect(() => {
-    if (open) {
-      setMode("search"); setSearch(""); setSelectedEleve(null);
-      setTypeInscription("abonne"); setSaving(false);
-      setDatesOccasion(dateStr ? [dateStr] : []);
-      setNewForm({ id:"", nom:"", prenom:"", classe:"6ème", forfait: slot?.mode||"groupe", actif:true, cotisation_payee:false, fiche_inscription:false, nom_parent1:"", tel_parent1:"", email:"", adresse:"", tel_parent2:"", tel_eleve:"", date_naissance:null });
-    }
-  }, [open, slot]);
-
-  // Auto-génère l'ID depuis nom+prénom
-  useEffect(() => {
-    if (newForm.prenom && newForm.nom) {
-      const id = `${newForm.prenom.charAt(0).toUpperCase()}${newForm.prenom.slice(1,3).toLowerCase()}.${newForm.nom.toUpperCase()}`;
-      setNewForm(f => ({ ...f, id }));
-    }
-  }, [newForm.prenom, newForm.nom]);
-
-  if (!slot) return null;
-  const alreadyIn = affectations.filter(a => a.creneau_id === slot.id && a.actif).map(a => a.eleve_id);
-  const searchResults = eleves
-    .filter(e => e.actif && !alreadyIn.includes(e.id) &&
-      (search.trim().length === 0 || `${e.prenom} ${e.nom}`.toLowerCase().includes(search.trim().toLowerCase())))
-    .sort((a, b) => a.nom.localeCompare(b.nom))
-    .slice(0, 10);
-
-  const slotLabel = `${(slot.heure_debut||"").substring(0,5)}–${(slot.heure_fin||"").substring(0,5)} · ${(FORFAITS[slot.mode]||{}).l||slot.mode}`;
-  const dateLabel = new Date(dateStr).toLocaleDateString("fr-FR",{weekday:"long",day:"2-digit",month:"long"});
-
-  const saveInscription = async () => {
-    setSaving(true);
-    let eleveId = selectedEleve?.id;
-    if (mode === "new") {
-      if (!newForm.nom || !newForm.prenom || !newForm.id) { setSaving(false); return; }
-      const res = await api.post("eleves", { ...newForm, date_naissance: newForm.date_naissance||null });
-      eleveId = res?.[0]?.id || newForm.id;
-    }
-    if (eleveId) {
-      const affData = { eleve_id: eleveId, creneau_id: slot.id, type_inscription: typeInscription, actif: true, jours_stage: null };
-      const datesOcc = typeInscription === "occasionnel" && datesOccasion.length > 0 ? datesOccasion.join(",") : null;
-      const createdAff = await api.post("affectations_creneaux", affData);
-      if (createdAff && datesOcc) await api.patch("affectations_creneaux", `eleve_id=eq.${eleveId}&creneau_id=eq.${slot.id}&actif=eq.true`, { dates_occasion: datesOcc });
-    }
-    setSaving(false); onClose(); refresh();
+  const openNew = () => {
+    setEditCr(null);
+    setForm({ type: "groupe", jour: "Lundi", heure_debut: "16:00", heure_fin: "17:00", capacite: 6, tarif: 15, periode_vacances: "toussaint", semaine_vacances: 1 });
+    setConflictMsg("");
+    setModal(true);
   };
 
-  const canSave = mode === "search"
-    ? (!!selectedEleve && (typeInscription !== "occasionnel" || datesOccasion.length > 0))
-    : !!(newForm.nom && newForm.prenom && newForm.id && (typeInscription !== "occasionnel" || datesOccasion.length > 0));
+  const openEdit = (cr) => {
+    setEditCr(cr);
+    setForm({
+      type: cr.type_creneau === "stage" ? "stage" : (cr.mode || "groupe"),
+      jour: cr.jour || "Lundi",
+      heure_debut: (cr.heure_debut || "16:00").substring(0, 5),
+      heure_fin: (cr.heure_fin || "17:00").substring(0, 5),
+      capacite: cr.capacite || 6,
+      tarif: cr.tarif || 15,
+      periode_vacances: cr.periode_vacances || "toussaint",
+      semaine_vacances: cr.semaine_vacances || 1,
+    });
+    setConflictMsg("");
+    setModal(true);
+  };
+
+  const toMin = t => { const [h, m] = (t || "00:00").split(":").map(Number); return h * 60 + m; };
+
+  const save = async () => {
+    setConflictMsg("");
+    const s = toMin(form.heure_debut);
+    const e = toMin(form.heure_fin);
+    if (e <= s) { setConflictMsg("L'heure de fin doit être après l'heure de début."); return; }
+    const isStage = form.type === "stage";
+    const others = creneaux.filter(cr => {
+      if (editCr && cr.id === editCr.id) return false;
+      if (isStage) return cr.type_creneau === "stage" && cr.periode_vacances === form.periode_vacances && Number(cr.semaine_vacances || 1) === Number(form.semaine_vacances);
+      return (cr.type_creneau || "regulier") === "regulier" && cr.jour === form.jour;
+    });
+    const clash = others.find(cr => toMin(cr.heure_debut) < e && s < toMin(cr.heure_fin));
+    if (clash) { setConflictMsg(`⚠️ Conflit avec ${(clash.heure_debut || "").substring(0, 5)}–${(clash.heure_fin || "").substring(0, 5)}`); return; }
+    setSaving(true);
+    const data = {
+      type_creneau: isStage ? "stage" : "regulier",
+      mode: isStage ? "stage" : form.type,
+      jour: isStage ? "Lundi" : form.jour,
+      heure_debut: form.heure_debut,
+      heure_fin: form.heure_fin,
+      capacite: Number(form.capacite),
+      tarif: form.tarif ? Number(form.tarif) : null,
+      periode_vacances: isStage ? form.periode_vacances : null,
+      semaine_vacances: isStage ? Number(form.semaine_vacances) : null,
+    };
+    if (editCr) await api.patch("creneaux", `id=eq.${editCr.id}`, data);
+    else await api.post("creneaux", data);
+    setSaving(false);
+    setModal(false);
+    refresh();
+  };
+
+  const deleteCreneau = async (cr) => {
+    const n = affectations.filter(a => a.creneau_id === cr.id && a.actif).length;
+    if (n > 0 && !window.confirm(`Ce créneau a ${n} élève(s) inscrit(s). Supprimer quand même ?`)) return;
+    await api.del("creneaux", `id=eq.${cr.id}`);
+    refresh();
+  };
+
+  const regulier = creneaux
+    .filter(cr => (cr.type_creneau || "regulier") === "regulier")
+    .sort((a, b) => JOURS_ALL.indexOf(a.jour) - JOURS_ALL.indexOf(b.jour) || (a.heure_debut || "").localeCompare(b.heure_debut || ""));
+  const stages = creneaux
+    .filter(cr => cr.type_creneau === "stage")
+    .sort((a, b) => (a.periode_vacances || "").localeCompare(b.periode_vacances || "") || (a.heure_debut || "").localeCompare(b.heure_debut || ""));
+
+  const isStageForm = form.type === "stage";
+
+  const SlotCard = ({ cr }) => {
+    const n = affectations.filter(a => a.creneau_id === cr.id && a.actif).length;
+    const pct = cr.capacite ? n / cr.capacite : 0;
+    const col = pct >= 1 ? C.danger : pct >= 0.7 ? C.warning : C.success;
+    return (
+      <div style={{ background: C.surfaceLight, borderRadius: 12, padding: 16, border: `2px solid ${col}33` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+          <div>
+            {cr.type_creneau === "stage"
+              ? <div style={{ fontWeight: 700, fontSize: 14, color: C.orange }}>{ALL_VACANCES.find(v => v.id === cr.periode_vacances)?.label || cr.periode_vacances} — S{cr.semaine_vacances}</div>
+              : <div style={{ fontWeight: 700, fontSize: 15, color: C.text }}>{cr.jour}</div>}
+            <div style={{ fontSize: 13, color: C.textMuted }}>{(cr.heure_debut || "").substring(0, 5)} – {(cr.heure_fin || "").substring(0, 5)}</div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <Btn small outline color={C.accent} onClick={() => openEdit(cr)}>✏️</Btn>
+            <Btn small outline color={C.danger} onClick={() => deleteCreneau(cr)}>🗑️</Btn>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Badge color={FORFAITS[cr.mode]?.c || C.blue}>{FORFAITS[cr.mode]?.l || cr.mode}</Badge>
+          <Badge color={col}>{n}/{cr.capacite || "?"} places</Badge>
+          {cr.tarif && <Badge color={C.gold}>{cr.tarif}€/h</Badge>}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <Modal open={open} onClose={onClose} title={`👤 Inscrire un prospect — ${slotLabel}`} wide>
-      <div style={{ background:C.surfaceLight, borderRadius:10, padding:"10px 16px", marginBottom:18, fontSize:13, color:C.textMuted }}>
-        📅 {dateLabel} · {slotLabel}
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, color: C.text, margin: 0 }}>Créneaux</h1>
+        <Btn onClick={openNew} color={C.accent}>+ Nouveau créneau</Btn>
       </div>
 
-      {/* Toggle Élève existant / Nouvel élève */}
-      <div style={{ display:"flex", gap:6, marginBottom:20, background:C.surfaceLight, borderRadius:10, padding:4, border:`1px solid ${C.border}` }}>
-        {[["search","📋 Liste des élèves"],["new","➕ Nouveau inscrit"]].map(([k,l]) => (
-          <button key={k} onClick={() => { setMode(k); setSelectedEleve(null); setSearch(""); }}
-            style={{ flex:1, padding:"9px 16px", borderRadius:8, border:"none", cursor:"pointer", background:mode===k?C.pink:"transparent", color:mode===k?"#fff":C.textMuted, fontSize:13, fontWeight:700, transition:"all 0.15s" }}>{l}</button>
-        ))}
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 20, marginBottom: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+        <h2 style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: "0 0 16px" }}>📅 Créneaux réguliers ({regulier.length})</h2>
+        {regulier.length === 0
+          ? <div style={{ color: C.textDim, textAlign: "center", padding: 24 }}>Aucun créneau régulier — cliquez "+ Nouveau créneau"</div>
+          : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 12 }}>
+              {regulier.map(cr => <SlotCard key={cr.id} cr={cr} />)}
+            </div>}
       </div>
 
-      {/* ── Mode RECHERCHE ── */}
-      {mode === "search" && (
-        <div>
-          <div style={{ position:"relative", marginBottom:12 }}>
-            <span style={{ position:"absolute", left:14, top:"50%", transform:"translateY(-50%)", fontSize:16, opacity:0.5 }}>🔍</span>
-            <input
-              autoFocus
-              value={search}
-              onChange={e => { setSearch(e.target.value); setSelectedEleve(null); }}
-              placeholder="Saisir le nom ou prénom…"
-              style={{ width:"100%", padding:"12px 14px 12px 42px", background:C.surface, border:`2px solid ${C.border}`, borderRadius:10, color:C.text, fontSize:15, boxSizing:"border-box" }}
-            />
-          </div>
-          {/* Résultats recherche — toujours visible */}
-          <div style={{ border:`1px solid ${C.border}`, borderRadius:10, overflow:"hidden", marginBottom:12, maxHeight:320, overflowY:"auto" }}>
-            {searchResults.length === 0 ? (
-              <div style={{ padding:"20px", textAlign:"center", color:C.textDim, fontSize:13 }}>{search.trim().length > 0 ? `Aucun élève trouvé pour "${search}"` : "Tous les élèves sont déjà inscrits à ce créneau"}</div>
-            ) : searchResults.map(el => (
-                <div key={el.id}
-                  onClick={() => { setSelectedEleve(el); setSearch(`${el.prenom} ${el.nom}`); }}
-                  style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 16px", cursor:"pointer", borderBottom:`1px solid ${C.border}`, background:selectedEleve?.id===el.id?C.pink+"15":"white", transition:"background 0.1s" }}
-                  onMouseEnter={e => { if(selectedEleve?.id!==el.id) e.currentTarget.style.background=C.surfaceLight; }}
-                  onMouseLeave={e => { if(selectedEleve?.id!==el.id) e.currentTarget.style.background="white"; }}
-                >
-                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    <div style={{ width:36, height:36, borderRadius:10, background:C.pink+"20", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:700, color:C.pink }}>
-                      {el.prenom.charAt(0)}{el.nom.charAt(0)}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight:700, fontSize:14, color:C.text }}>{el.prenom} {el.nom}</div>
-                      <div style={{ fontSize:12, color:C.textMuted }}>{el.classe} · {(FORFAITS[el.forfait]||{}).l||el.forfait}</div>
-                    </div>
-                  </div>
-                  {selectedEleve?.id === el.id && <span style={{ color:C.success, fontSize:20 }}>✓</span>}
-                </div>
-              ))}
-          </div>
-          {selectedEleve && (
-            <div style={{ background:C.success+"10", border:`2px solid ${C.success}44`, borderRadius:10, padding:"12px 16px", marginBottom:12, display:"flex", alignItems:"center", gap:10 }}>
-              <span style={{ fontSize:20 }}>✅</span>
-              <div><span style={{ fontWeight:700, color:C.text }}>{selectedEleve.prenom} {selectedEleve.nom}</span><span style={{ color:C.textMuted, fontSize:13, marginLeft:8 }}>{selectedEleve.classe}</span></div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Mode NOUVEL ÉLÈVE ── */}
-      {mode === "new" && (
-        <div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:4 }}>
-            <Input label="Prénom *" value={newForm.prenom||""} onChange={v => setNewForm(f=>({...f,prenom:v}))} placeholder="Prénom" />
-            <Input label="Nom *" value={newForm.nom||""} onChange={v => setNewForm(f=>({...f,nom:v}))} placeholder="NOM" />
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
-            <Input label="Identifiant *" value={newForm.id||""} onChange={v => setNewForm(f=>({...f,id:v}))} placeholder="Pre.NOM" />
-            <Input label="Classe" value={newForm.classe||"6ème"} onChange={v => setNewForm(f=>({...f,classe:v}))} options={CLASSES.map(c=>[c,c])} />
-            <Input label="Forfait" value={newForm.forfait||"groupe"} onChange={v => setNewForm(f=>({...f,forfait:v}))} options={Object.entries(FORFAITS).map(([k,v])=>[k,`${v.l} (${v.t}€/h)`])} />
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <Input label="Parent" value={newForm.nom_parent1||""} onChange={v => setNewForm(f=>({...f,nom_parent1:v}))} placeholder="Nom du parent" />
-            <Input label="Téléphone parent" value={newForm.tel_parent1||""} onChange={v => setNewForm(f=>({...f,tel_parent1:v}))} placeholder="06…" />
-          </div>
-          <Input label="Email" value={newForm.email||""} onChange={v => setNewForm(f=>({...f,email:v}))} placeholder="email@exemple.com" />
-          <div style={{ background:C.warning+"12", border:`1px solid ${C.warning}33`, borderRadius:8, padding:"8px 12px", fontSize:12, color:C.warning, fontWeight:600 }}>
-            ⚠️ L'élève sera créé et inscrit à ce créneau. Pensez à compléter sa fiche depuis la page Élèves.
+      {stages.length > 0 && (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <h2 style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: "0 0 16px" }}>🏕️ Stages vacances ({stages.length})</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 12 }}>
+            {stages.map(cr => <SlotCard key={cr.id} cr={cr} />)}
           </div>
         </div>
       )}
 
-      {/* ── Type d'inscription ── */}
-      <div style={{ marginTop:20, marginBottom:20 }}>
-        <div style={{ fontSize:12, fontWeight:700, color:C.textMuted, marginBottom:10, textTransform:"uppercase" }}>Type d'inscription</div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-          {[
-            ["abonne","🔄 Permanent","Jusqu'à la fin de l'année scolaire",C.accent],
-            ["occasionnel","⚡ Occasionnel","Séances ponctuelles (place provisoire)",C.warning]
-          ].map(([k,l,sub,col]) => (
-            <div key={k} onClick={() => { setTypeInscription(k); if (k === "occasionnel") setDatesOccasion(dateStr ? [dateStr] : []); else setDatesOccasion([]); }}
-              style={{ padding:"14px 16px", borderRadius:12, cursor:"pointer", border:`2px solid ${typeInscription===k?col:C.border}`, background:typeInscription===k?col+"12":"transparent", transition:"all 0.15s" }}>
-              <div style={{ fontWeight:700, fontSize:14, color:typeInscription===k?col:C.text, marginBottom:4 }}>{l}</div>
-              <div style={{ fontSize:12, color:C.textMuted }}>{sub}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Sélecteur de dates pour occasionnel ── */}
-      {typeInscription === "occasionnel" && (() => {
-        const allDates = [dateStr, ...getNextOccurrences(slot.jour, dateStr, 7)];
-        return (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: C.textMuted, marginBottom: 8, textTransform: "uppercase" }}>
-              Séances sélectionnées <span style={{ color: C.warning, textTransform: "none", fontWeight: 400 }}>(au moins une obligatoire)</span>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
-              {allDates.map(d => {
-                const sel = datesOccasion.includes(d);
-                return (
-                  <label key={d} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 10px", borderRadius: 10, border: `2px solid ${sel ? C.warning : C.border}`, background: sel ? C.warning+"15" : "transparent", cursor: "pointer", minWidth: 58 }}>
-                    <input type="checkbox" checked={sel} onChange={() => setDatesOccasion(prev => sel ? prev.filter(x => x !== d) : [...prev, d])} style={{ accentColor: C.warning, width: 16, height: 16 }} />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: sel ? C.warning : C.text }}>{fmtDateFr(d)}</span>
-                  </label>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: 11, color: C.textDim }}>{datesOccasion.length} séance{datesOccasion.length > 1 ? "s" : ""} sélectionnée{datesOccasion.length > 1 ? "s" : ""}</div>
+      <Modal open={modal} onClose={() => setModal(false)} title={editCr ? "✏️ Modifier le créneau" : "➕ Nouveau créneau"}>
+        <Input label="Type de créneau" value={form.type} onChange={v => setForm({ ...form, type: v })}
+          options={[["groupe", "🏫 Groupe (régulier)"], ["individuel", "👤 Individuel (régulier)"], ["stage", "🏕️ Stage vacances"]]} />
+        {!isStageForm && (
+          <Input label="Jour de la semaine" value={form.jour} onChange={v => setForm({ ...form, jour: v })} options={JOURS_ALL.map(j => [j, j])} />
+        )}
+        {isStageForm && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Input label="Période de vacances" value={form.periode_vacances || "toussaint"} onChange={v => setForm({ ...form, periode_vacances: v })} options={PERIODES} />
+            <Input label="Semaine" value={form.semaine_vacances} onChange={v => setForm({ ...form, semaine_vacances: v })} options={[["1", "Semaine 1"], ["2", "Semaine 2"]]} />
           </div>
-        );
-      })()}
-
-      <div style={{ display:"flex", justifyContent:"flex-end", gap:10 }}>
-        <Btn onClick={onClose} color={C.textMuted} outline>Annuler</Btn>
-        <Btn onClick={saveInscription} disabled={saving || !canSave} color={C.success}>
-          {saving ? "⏳ Enregistrement..." : `✓ Inscrire ${typeInscription==="abonne"?"(permanent)":"(occasionnel)"}`}
-        </Btn>
-      </div>
-    </Modal>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Input label="Heure de début" value={form.heure_debut} onChange={v => setForm({ ...form, heure_debut: v })} type="time" />
+          <Input label="Heure de fin" value={form.heure_fin} onChange={v => setForm({ ...form, heure_fin: v })} type="time" />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Input label="Capacité (nb places)" value={form.capacite} onChange={v => setForm({ ...form, capacite: v })} type="number" />
+          <Input label="Tarif (€/h)" value={form.tarif} onChange={v => setForm({ ...form, tarif: v })} type="number" />
+        </div>
+        {isStageForm && (
+          <div style={{ background: C.orange + "15", borderRadius: 8, padding: 10, fontSize: 12, color: C.orange, marginBottom: 4 }}>
+            🏕️ Affiché du lun. au ven. — semaine {form.semaine_vacances} des {ALL_VACANCES.find(v => v.id === form.periode_vacances)?.label || "vacances"}.
+          </div>
+        )}
+        {conflictMsg && (
+          <div style={{ background: C.danger + "15", border: `2px solid ${C.danger}44`, borderRadius: 8, padding: "10px 14px", fontSize: 13, color: C.danger, marginBottom: 4 }}>{conflictMsg}</div>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+          <Btn outline color={C.textMuted} onClick={() => setModal(false)}>Annuler</Btn>
+          <Btn onClick={save} disabled={saving} color={isStageForm ? C.orange : C.accent}>
+            {saving ? "..." : editCr ? "Modifier" : "Créer"}
+          </Btn>
+        </div>
+      </Modal>
+    </div>
   );
 };
-
 // ═══ DISPONIBILITÉS ═══
 const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh }) => {
   const [selectedDate, setSelectedDate] = useState(getSmartDay().date);
@@ -2817,7 +2142,7 @@ export default function App() {
       case "dashboard": return <DashboardPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} onNavigate={nav} />;
       case "planning": return <PlanningPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} suiviMensuel={suiviMensuel} refresh={loadData} initialDate={pageParams.date} />;
       case "eleves": return <ElevesPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} refresh={loadData} initialAction={pageParams.action} initialOpenId={pageParams.openId} />;
-      case "creneaux": return <CreneauxPage creneaux={creneaux} affectations={affectations} eleves={eleves} refresh={loadData} />;
+      case "creneaux": return <CreneauxPage creneaux={creneaux} affectations={affectations} refresh={loadData} />;
       case "paiements": return <PaiementsPage eleves={eleves} paiements={paiements} refresh={loadData} />;
       case "disponibilites": return <DisponibilitesPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} refresh={loadData} />;
       case "sms": return <SMSPage eleves={eleves} suiviMensuel={suiviMensuel} paiements={paiements} />;
