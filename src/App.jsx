@@ -287,15 +287,21 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations, refresh })
   const addStudent = async () => {
     if (!addEleve) return;
     const joursStr = isStage ? JOURS_STAGE.filter((_, i) => addJours[i]).join(",") : null;
-    const affData = { eleve_id: addEleve, creneau_id: slot.id, type_inscription: isStage ? "stage" : addType, actif: true, jours_stage: joursStr };
+    const typeInscription = isStage ? "stage" : addType;
     const datesOcc = !isStage && addType === "occasionnel" && addDatesOccasion.length > 0 ? addDatesOccasion.join(",") : null;
-    const created = await api.post("affectations_creneaux", affData);
-    if (!created) return;
+    // Upsert : réactiver une ligne inactive si elle existe (évite contrainte unique)
+    const reactivated = await api.patch("affectations_creneaux",
+      `eleve_id=eq.${addEleve}&creneau_id=eq.${slot.id}&actif=eq.false`,
+      { actif: true, type_inscription: typeInscription, jours_stage: joursStr });
+    if (!reactivated || reactivated.length === 0) {
+      const created = await api.post("affectations_creneaux", { eleve_id: addEleve, creneau_id: slot.id, type_inscription: typeInscription, actif: true, jours_stage: joursStr });
+      if (!created) return;
+    }
     if (datesOcc) await api.patch("affectations_creneaux", `eleve_id=eq.${addEleve}&creneau_id=eq.${slot.id}&actif=eq.true`, { dates_occasion: datesOcc });
     setAddEleve(""); setAddJours(JOURS_STAGE.map(() => true)); setAddDatesOccasion([]); refresh();
   };
   const periodeLabel = isStage ? PERIODES.find(p => p[0] === slot.periode_vacances)?.[1] || "" : "";
-  const isFullForAbonne = !isStage && students.length >= slot.capacite && addType === "abonne";
+  const isFullForAbonne = !isStage && slot.capacite != null && students.length >= slot.capacite && addType === "abonne";
   const needsDates = !isStage && addType === "occasionnel";
   const canAdd = !isFullForAbonne && (isStage
     ? JOURS_STAGE.some((_, i) => addJours[i] && jourCounts[i] < slot.capacite)
@@ -1076,9 +1082,10 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences, suiviMensuel,
           const slot = daySlots.find(s => s.id === inscriptionSlot.slotId);
           if (!slot) return <div style={{ color:C.textDim, padding:20, textAlign:"center" }}>Créneau introuvable pour cette date.</div>;
           const effCount = slot.students.filter(st => st.presence?.statut !== "absent_justifie").length;
-          const isFull = effCount >= slot.capacite;
-          const alreadyIds = slot.students.map(s => s.id);
-          const availableEleves = eleves.filter(e => e.actif && !alreadyIds.includes(e.id));
+          const isFull = slot.capacite != null && effCount >= slot.capacite;
+          // Exclure tous les élèves avec une affectation active sur ce créneau (pas seulement ceux du jour)
+          const allSlotAffIds = affectations.filter(a => a.creneau_id === slot.id && a.actif).map(a => a.eleve_id);
+          const availableEleves = eleves.filter(e => e.actif && !allSlotAffIds.includes(e.id));
           return (<div>
             {/* Section inscrits */}
             <div style={{ marginBottom:20 }}>
