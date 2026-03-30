@@ -129,6 +129,20 @@ const getNextOccurrences = (jour, fromDate, count = 10) => { const dayIdx = JOUR
 const fmtDateFr = (dateStr) => { const d = new Date(dateStr); return `${d.getDate().toString().padStart(2,"0")}/${(d.getMonth()+1).toString().padStart(2,"0")}`; };
 const getVacationWeekDates = (periodeId, semaine) => { const vac = ALL_VACANCES.find(v => v.id === periodeId); if (!vac) return []; const start = semaine === 1 ? vac.s1d : vac.s2d; const end = semaine === 1 ? vac.s1f : vac.s2f; const dates = []; const d = new Date(start + "T12:00:00"); const endD = new Date(end + "T12:00:00"); while (d <= endD) { if (d.getDay() >= 1 && d.getDay() <= 5) dates.push(d.toISOString().split("T")[0]); d.setDate(d.getDate() + 1); } return dates; };
 
+// ═══ HELPER PARTAGÉ : nombre d'inscrits dans un créneau ═══
+// Sans dateStr → abonnés actifs seulement (occasionnels ignorés, pas de date de référence)
+// Avec dateStr → abonnés actifs + occasionnels dont cette date est dans dates_occasion
+const countInscrits = (affectations, creneauId, dateStr = null) =>
+  affectations.filter(a => {
+    if (a.creneau_id !== creneauId || !a.actif) return false;
+    if (a.type_inscription === "occasionnel") {
+      if (!dateStr) return false;
+      const dates = a.dates_occasion ? a.dates_occasion.split(",").map(d => d.trim()) : [];
+      return dates.includes(dateStr);
+    }
+    return true;
+  }).length;
+
 // ═══ UI COMPONENTS ═══
 const Badge = ({ children, color = C.accent, onClick, title }) => (
   <span onClick={onClick} title={title} style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, background: color + "22", color, whiteSpace: "nowrap", cursor: onClick ? "pointer" : "default" }}>{children}</span>
@@ -236,7 +250,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
   const classeData = useMemo(() => { const c = {}; eleves.filter(e => e.actif).forEach(e => { if (e.classe) c[e.classe] = (c[e.classe]||0)+1; }); return CLASSES.map(cl => ({ name: cl, value: c[cl]||0 })).filter(d => d.value > 0); }, [eleves]);
 
   const creneauxOccupation = useMemo(() => creneaux.filter(cr => (cr.type_creneau||"regulier")==="regulier").map(cr => {
-    const n = affectations.filter(a => a.creneau_id === cr.id && a.actif).length;
+    const n = countInscrits(affectations, cr.id);
     return { name: `${cr.jour.substring(0,3)} ${(cr.heure_debut||"").substring(0,5)}-${(cr.heure_fin||"").substring(0,5)}`, occupes: n, capacite: cr.capacite, id: cr.id };
   }).filter(c => c.capacite > 1), [creneaux, affectations]);
 
@@ -265,7 +279,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
     const rel = ctx.type === "vacances"
       ? creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === ctx.vacance?.id && cr.semaine_vacances === ctx.semaine)
       : creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dayName);
-    return rel.map(cr => { const sts = affectations.filter(a => a.creneau_id === cr.id && a.actif).map(a => eleves.find(e => e.id === a.eleve_id)).filter(Boolean); return { ...cr, students: sts }; });
+    return rel.map(cr => { const sts = affectations.filter(a => { if (a.creneau_id !== cr.id || !a.actif) return false; if (a.type_inscription === "occasionnel") { const dates = a.dates_occasion ? a.dates_occasion.split(",").map(d => d.trim()) : []; return dates.includes(smart.date); } return true; }).map(a => eleves.find(e => e.id === a.eleve_id)).filter(Boolean); return { ...cr, students: sts }; });
   }, [creneaux, affectations, eleves, smart, dayName]);
 
   const ctxLabel = smart.ctx.type === "vacances" ? `🏕️ ${smart.ctx.vacance.label} S${smart.ctx.semaine}` : smart.ctx.type === "samedi_milieu" ? "😴 Samedi milieu" : "📚 Période scolaire";
@@ -537,7 +551,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences: initialPresen
                         onClick={() => { setSelectedSlot({ slot, dateStr }); setAddEleve(""); setAddType("abonne"); }}
                         style={{ background: isSelected ? col + "22" : C.surface, border: `2px solid ${col}${isSelected ? "" : "77"}`, borderRadius: 8, padding: "8px 10px", marginBottom: 6, cursor: "pointer", transition: "all 0.15s" }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{(slot.heure_debut || "").substring(0, 5)}–{(slot.heure_fin || "").substring(0, 5)}</div>
-                        <div style={{ fontSize: 11, color: col, fontWeight: 600, marginTop: 2 }}>{slot.effCount}/{slot.capacite || "?"}</div>
+                        <div style={{ fontSize: 11, color: col, fontWeight: 600, marginTop: 2 }}>{slot.students.length}/{slot.capacite || "?"}</div>
                         {slot.students.some(s => s.presence) && <div style={{ fontSize: 10, color: C.success, marginTop: 1 }}>✓ appel</div>}
                       </div>
                     );
@@ -837,7 +851,7 @@ const CreneauxPage = ({ creneaux, affectations, refresh }) => {
   };
 
   const deleteCreneau = async (cr) => {
-    const n = affectations.filter(a => a.creneau_id === cr.id && a.actif).length;
+    const n = countInscrits(affectations, cr.id);
     if (n > 0 && !window.confirm(`Ce créneau a ${n} élève(s) inscrit(s). Supprimer quand même ?`)) return;
     await api.del("creneaux", `id=eq.${cr.id}`);
     refresh();
@@ -853,7 +867,7 @@ const CreneauxPage = ({ creneaux, affectations, refresh }) => {
   const isStageForm = form.type === "stage";
 
   const SlotCard = ({ cr }) => {
-    const n = affectations.filter(a => a.creneau_id === cr.id && a.actif).length;
+    const n = countInscrits(affectations, cr.id);
     const pct = cr.capacite ? n / cr.capacite : 0;
     const col = pct >= 1 ? C.danger : pct >= 0.7 ? C.warning : C.success;
     return (
