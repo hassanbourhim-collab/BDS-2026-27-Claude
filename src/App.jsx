@@ -288,31 +288,46 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
   const totalRetard = retards.reduce((s, r) => s + r.solde, 0);
   const pieColors = ["#03A9F4","#9C27B0","#E91E63","#FF9800","#4CAF50","#00BCD4","#FF5722","#3F51B5"];
 
-  // ─── logique séance du jour ───
+  // ─── logique prochaine séance (au-delà d'aujourd'hui si nécessaire) ───
   const slotDur = (slot) => slot ? Math.max(0.5, (new Date(`2000-01-01T${slot.heure_fin||"00:00"}`) - new Date(`2000-01-01T${slot.heure_debut||"00:00"}`)) / 3600000) : 1;
   const dateToday = todayStr();
   const nowHHMM = new Date().toTimeString().substring(0, 5);
 
-  const todayCreneaux = useMemo(() => {
-    const dow = new Date(dateToday + "T12:00:00").getDay();
-    const dn = JOURS_SEMAINE[dow];
-    const ctx = getDateContext(dateToday);
-    if (ctx.type === "samedi_milieu" || dow === 0) return [];
-    if (ctx.type === "vacances") return creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === ctx.vacance?.id && cr.semaine_vacances === ctx.semaine);
-    return creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dn)
-      .sort((a,b) => (a.heure_debut||"").localeCompare(b.heure_debut||""));
-  }, [creneaux, dateToday]);
+  // Cherche la prochaine séance sur les 14 prochains jours
+  const findNextSession = useMemo(() => {
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(dateToday + "T12:00:00");
+      d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().split("T")[0];
+      const dow = d.getDay();
+      const dn = JOURS_SEMAINE[dow];
+      const ctx = getDateContext(dateStr);
+      if (ctx.type === "samedi_milieu" || dow === 0) continue;
+      let slots = ctx.type === "vacances"
+        ? creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === ctx.vacance?.id && cr.semaine_vacances === ctx.semaine)
+        : creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dn);
+      slots = slots.sort((a,b) => (a.heure_debut||"").localeCompare(b.heure_debut||""));
+      if (slots.length === 0) continue;
+      if (i === 0) {
+        // Aujourd'hui : en cours en priorité, sinon prochain
+        const inProgress = slots.find(cr => (cr.heure_debut||"") <= nowHHMM && nowHHMM <= (cr.heure_fin||""));
+        if (inProgress) return { slots, date: dateStr, autoId: inProgress.id };
+        const upcoming = slots.filter(cr => (cr.heure_debut||"") > nowHHMM);
+        if (upcoming.length > 0) return { slots, date: dateStr, autoId: upcoming[0].id };
+      } else {
+        // Jour futur : premier créneau du jour
+        return { slots, date: dateStr, autoId: slots[0].id };
+      }
+    }
+    return { slots: [], date: dateToday, autoId: null };
+  }, [creneaux, dateToday, nowHHMM]);
 
-  const autoCreneauId = useMemo(() => {
-    const inProgress = todayCreneaux.find(cr => (cr.heure_debut||"") <= nowHHMM && nowHHMM <= (cr.heure_fin||""));
-    if (inProgress) return inProgress.id;
-    const upcoming = todayCreneaux.filter(cr => (cr.heure_debut||"") > nowHHMM);
-    return upcoming[0]?.id || null;
-  }, [todayCreneaux, nowHHMM]);
-
-  const effectiveCreneauId = selectedCreneauId || autoCreneauId;
-  const selectedCreneau = todayCreneaux.find(cr => cr.id === effectiveCreneauId) || null;
-  const isEnCours = !!(selectedCreneau && (selectedCreneau.heure_debut||"") <= nowHHMM && nowHHMM <= (selectedCreneau.heure_fin||""));
+  const sessionSlots = findNextSession.slots;
+  const sessionDate  = findNextSession.date;
+  const effectiveCreneauId = selectedCreneauId || findNextSession.autoId;
+  const selectedCreneau = sessionSlots.find(cr => cr.id === effectiveCreneauId) || null;
+  const isEnCours = !!(selectedCreneau && sessionDate === dateToday
+    && (selectedCreneau.heure_debut||"") <= nowHHMM && nowHHMM <= (selectedCreneau.heure_fin||""));
 
   const retardIds = useMemo(() => new Set(retards.map(r => String(r.id))), [retards]);
 
@@ -322,23 +337,23 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
       if (a.creneau_id !== selectedCreneau.id || !a.actif) return false;
       if (a.type_inscription === "occasionnel") {
         const dates = a.dates_occasion ? a.dates_occasion.split(",").map(d => d.trim()) : [];
-        return dates.includes(dateToday);
+        return dates.includes(sessionDate);
       }
       return true;
     }).map(a => {
       const el = eleves.find(e => e.id === a.eleve_id);
       if (!el) return null;
-      const pres = localPresencesToday.find(p => p.eleve_id === a.eleve_id && p.creneau_id === selectedCreneau.id && p.date_cours === dateToday);
+      const pres = localPresencesToday.find(p => p.eleve_id === a.eleve_id && p.creneau_id === selectedCreneau.id && p.date_cours === sessionDate);
       return { ...el, type_inscription: a.type_inscription, affectation_id: a.id, presence: pres || null };
     }).filter(Boolean).sort((a,b) => a.nom.localeCompare(b.nom));
-  }, [selectedCreneau, affectations, eleves, localPresencesToday, dateToday]);
+  }, [selectedCreneau, affectations, eleves, localPresencesToday, sessionDate]);
 
   const slotEffCount = slotStudents.filter(s => s.presence?.statut !== "absent_justifie" && s.presence?.statut !== "absent_non_justifie").length;
 
   const reloadPresencesToday = useCallback(async () => {
-    const d = await api.get("presences", `date_cours=eq.${dateToday}`);
+    const d = await api.get("presences", `date_cours=eq.${sessionDate}`);
     setLocalPresencesToday(d || []);
-  }, [dateToday]);
+  }, [sessionDate]);
 
   useEffect(() => { reloadPresencesToday(); }, [reloadPresencesToday]);
 
@@ -348,7 +363,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
     if (st.presence) {
       await api.patch("presences", `id=eq.${st.presence.id}`, { statut, heures });
     } else {
-      await api.post("presences", { eleve_id: st.id, creneau_id: selectedCreneau.id, date_cours: dateToday, statut, heures });
+      await api.post("presences", { eleve_id: st.id, creneau_id: selectedCreneau.id, date_cours: sessionDate, statut, heures });
     }
     await reloadPresencesToday();
   };
@@ -393,24 +408,24 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 22 }}>{isEnCours ? "🟢" : "📋"}</span>
             <span style={{ fontWeight: 800, fontSize: 17, color: C.text }}>{isEnCours ? "Séance en cours" : "Prochaine séance"}</span>
-            {selectedCreneau && <Badge color={isEnCours ? C.success : C.accent}>{(selectedCreneau.heure_debut||"").substring(0,5)}–{(selectedCreneau.heure_fin||"").substring(0,5)}</Badge>}
+            {selectedCreneau && <Badge color={isEnCours ? C.success : C.accent}>{new Date(sessionDate + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })} · {(selectedCreneau.heure_debut||"").substring(0,5)}–{(selectedCreneau.heure_fin||"").substring(0,5)}</Badge>}
             {selectedCreneau && <Badge color={C.textMuted}>{FORFAITS[selectedCreneau.mode]?.l || selectedCreneau.mode}</Badge>}
             {selectedCreneau && <Badge color={C.blue}>{slotEffCount}/{selectedCreneau.capacite||"?"}</Badge>}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {todayCreneaux.length > 1 && (
+            {sessionSlots.length > 1 && (
               <select value={effectiveCreneauId||""} onChange={e => setSelectedCreneauId(e.target.value || null)}
                 style={{ padding: "6px 12px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13, fontWeight: 600 }}>
-                {todayCreneaux.map(cr => <option key={cr.id} value={cr.id}>{(cr.heure_debut||"").substring(0,5)}–{(cr.heure_fin||"").substring(0,5)} · {FORFAITS[cr.mode]?.l||cr.mode}</option>)}
+                {sessionSlots.map(cr => <option key={cr.id} value={cr.id}>{(cr.heure_debut||"").substring(0,5)}–{(cr.heure_fin||"").substring(0,5)} · {FORFAITS[cr.mode]?.l||cr.mode}</option>)}
               </select>
             )}
-            <span style={{ color: C.accent, fontSize: 12, fontWeight: 600, cursor: "pointer" }} onClick={() => onNavigate("planning", { date: dateToday })}>Planning →</span>
+            <span style={{ color: C.accent, fontSize: 12, fontWeight: 600, cursor: "pointer" }} onClick={() => onNavigate("planning", { date: sessionDate, slotId: effectiveCreneauId })}>Planning →</span>
           </div>
         </div>
 
         {/* Contenu */}
-        {todayCreneaux.length === 0 ? (
-          <div style={{ textAlign: "center", color: C.textDim, padding: "20px 0", fontSize: 14 }}>Aucune séance aujourd'hui</div>
+        {sessionSlots.length === 0 ? (
+          <div style={{ textAlign: "center", color: C.textDim, padding: "20px 0", fontSize: 14 }}>Aucune séance à venir</div>
         ) : !selectedCreneau ? null : slotStudents.length === 0 ? (
           <div style={{ textAlign: "center", color: C.textDim, padding: "16px 0", fontSize: 13 }}>Aucun élève inscrit pour cette séance</div>
         ) : (
@@ -507,7 +522,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
 };
 
 // ═══ PLANNING / APPEL ═══
-const PlanningPage = ({ creneaux, affectations, eleves, presences: initialPresences, refresh, initialDate }) => {
+const PlanningPage = ({ creneaux, affectations, eleves, presences: initialPresences, refresh, initialDate, initialSlotId }) => {
   const [weekStart, setWeekStart] = useState(() => getWeekDates(initialDate || getSmartDay().date)[0]);
   const [selectedSlot, setSelectedSlot] = useState(null); // { slot, dateStr }
   const [localPresences, setLocalPresences] = useState(initialPresences || []);
@@ -524,6 +539,15 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences: initialPresen
   }, [weekDates]);
 
   useEffect(() => { loadWeekPresences(); }, [loadWeekPresences]);
+
+  // Sélection automatique du créneau si transmis depuis le tableau de bord
+  useEffect(() => {
+    if (initialSlotId && initialDate) {
+      const slots = getCreneauxForDate(initialDate);
+      const slot = slots.find(s => s.id === initialSlotId || String(s.id) === String(initialSlotId));
+      if (slot) setSelectedSlot({ slot, dateStr: initialDate });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const navigate = (dir) => {
     const d = new Date(weekStart + "T12:00:00");
@@ -2328,7 +2352,7 @@ export default function App() {
     if (error) return <div style={{ background: C.danger+"15", borderRadius: 16, padding: 30, textAlign: "center", border: `2px solid ${C.danger}44` }}><div style={{ color: C.danger, marginBottom: 12, fontWeight: 600 }}>{error}</div><Btn onClick={loadData}>Réessayer</Btn></div>;
     switch(page) {
       case "dashboard": return <DashboardPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} onNavigate={nav} refresh={loadData} />;
-      case "planning": return <PlanningPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} suiviMensuel={suiviMensuel} refresh={loadData} initialDate={pageParams.date} />;
+      case "planning": return <PlanningPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} suiviMensuel={suiviMensuel} refresh={loadData} initialDate={pageParams.date} initialSlotId={pageParams.slotId} />;
       case "eleves": return <ElevesPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} refresh={loadData} initialAction={pageParams.action} initialOpenId={pageParams.openId} />;
       case "creneaux": return <CreneauxPage creneaux={creneaux} affectations={affectations} refresh={loadData} />;
       case "paiements": return <PaiementsPage eleves={eleves} paiements={paiements} refresh={loadData} />;
