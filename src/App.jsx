@@ -978,27 +978,31 @@ const CreneauxPage = ({ creneaux, affectations, refresh }) => {
 const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh }) => {
   const [selectedDate, setSelectedDate] = useState(getSmartDay().date);
   const [viewMode, setViewMode] = useState("semaine"); // "jour" | "semaine"
-  const [filterMode, setFilterMode] = useState("tous"); // "tous" | "regulier" | "provisoire"
+  const [filterMode, setFilterMode] = useState("tous"); // "tous" | "regulier" | "occasionnel"
 
   // Calcul des disponibilités pour un créneau à une date donnée
-  // RÈGLE : placesLibres = capacité - abonnés (pas les occasionnels)
-  // Une place libre est dispo en PERMANENTE et aussi en PROVISOIRE
-  // Places provisoires SUPPLÉMENTAIRES = abonnés absents justifiés ce jour
+  // placesLibres       = capacité - abonnés          (pour inscription régulière)
+  // placesOccasionnelles = capacité - abonnés - occasionnels de ce jour (pour cours ponctuel)
   const getDispoSlot = useCallback((cr, dateStr) => {
     const dow = new Date(dateStr + "T12:00:00").getDay();
     const dayName = JOURS_SEMAINE[dow];
     const aff = affectations.filter(a => a.creneau_id === cr.id && a.actif
       && !(a.date_debut && a.date_debut > dateStr)
       && !(a.date_fin && a.date_fin < dateStr));
-    const inscrits = cr.type_creneau === "stage"
-      ? aff.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
-      : aff.length;
     const abonnes = aff.filter(a => a.type_inscription === "abonne");
     const nbAbonnes = cr.type_creneau === "stage"
       ? abonnes.filter(a => !a.jours_stage || a.jours_stage.includes(dayName)).length
       : abonnes.length;
+    const nbOccasionnelsCeJour = aff.filter(a => {
+      if (a.type_inscription !== "occasionnel") return false;
+      const dates = a.dates_occasion ? a.dates_occasion.split(",").map(d => d.trim()) : [];
+      return dates.includes(dateStr);
+    }).length;
+    const inscrits = nbAbonnes + nbOccasionnelsCeJour;
     const placesLibres = Math.max(0, cr.capacite - nbAbonnes);
-    return { inscrits, nbAbonnes, placesLibres };
+    const placesOccasionnelles = Math.max(0, cr.capacite - inscrits);
+    const total = placesLibres;
+    return { inscrits, nbAbonnes, nbOccasionnelsCeJour, placesLibres, placesOccasionnelles, total };
   }, [affectations]);
 
   // Slots applicables pour une date
@@ -1022,8 +1026,8 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
     return slots.map(cr => ({ ...cr, dispo: getDispoSlot(cr, selectedDate) }))
       .filter(cr => {
         if (filterMode === "regulier") return cr.dispo.placesLibres > 0;
-        if (filterMode === "provisoire") return cr.dispo.totalProvisoire > 0;
-        return cr.dispo.total > 0;
+        if (filterMode === "occasionnel") return cr.dispo.placesOccasionnelles > 0;
+        return true; // "tous" = tous les créneaux du jour
       });
   }, [selectedDate, getSlotsForDate, getDispoSlot, filterMode]);
 
@@ -1036,11 +1040,11 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
     const slots = getSlotsForDate(dateStr);
     const dispos = slots.map(cr => ({ ...cr, dispo: getDispoSlot(cr, dateStr) }));
     const totalLibres = dispos.reduce((s, cr) => s + cr.dispo.placesLibres, 0);
-    const totalProv = dispos.reduce((s, cr) => s + cr.dispo.placesProvisSupp, 0);
-    return { dateStr, dayName, dow, ctx, dispos: dispos.filter(cr => cr.dispo.total > 0), totalLibres, totalProv, isToday: dateStr === todayStr() };
+    const totalOcc = dispos.reduce((s, cr) => s + cr.dispo.placesOccasionnelles, 0);
+    return { dateStr, dayName, dow, ctx, dispos: dispos.filter(cr => cr.dispo.total > 0), totalLibres, totalOcc, isToday: dateStr === todayStr() };
   }), [semaineDates, getSlotsForDate, getDispoSlot]);
 
-  const totalJour = jourData.reduce((s, cr) => ({ libres: s.libres + cr.dispo.placesLibres, prov: s.prov + cr.dispo.placesProvisSupp }), { libres: 0, prov: 0 });
+  const totalJour = jourData.reduce((s, cr) => ({ libres: s.libres + cr.dispo.placesLibres, prov: s.prov + cr.dispo.placesOccasionnelles }), { libres: 0, prov: 0 });
   const moveWeek = (dir) => { const d = new Date(selectedDate); d.setDate(d.getDate() + dir * 7); setSelectedDate(d.toISOString().split("T")[0]); };
   const wd0 = new Date(semaineDates[0]); const wd5 = new Date(semaineDates[5]);
   const wLabel = `${wd0.getDate()} ${wd0.toLocaleDateString("fr-FR",{month:"short"})} — ${wd5.getDate()} ${wd5.toLocaleDateString("fr-FR",{month:"short",year:"numeric"})}`;
@@ -1072,7 +1076,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
         <Btn small onClick={() => setSelectedDate(todayStr())} color={C.accent} outline>Aujourd'hui</Btn>
         {viewMode === "jour" && (
           <div style={{ display:"flex", gap:6, marginLeft:"auto" }}>
-            {[["tous","Tout"],["regulier","🟢 Régulières"],["provisoire","💬 Provisoires"]].map(([k,l]) => (
+            {[["tous","Tout"],["regulier","🟢 Régulières"],["occasionnel","⚡ Occasionnels"]].map(([k,l]) => (
               <button key={k} onClick={() => setFilterMode(k)} style={{ padding:"7px 14px", borderRadius:8, border:`2px solid ${filterMode===k?C.accent:C.border}`, cursor:"pointer", background:filterMode===k?C.accent+"15":"transparent", color:filterMode===k?C.accent:C.textMuted, fontSize:12, fontWeight:700 }}>{l}</button>
             ))}
           </div>
@@ -1087,7 +1091,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
           </div>
           {/* Légende */}
           <div style={{ display:"flex", gap:16, marginBottom:16 }}>
-            {[[C.success,"🟢 Place régulière libre"],[C.warning,"💬 Place provisoire (absent justifié ce jour)"],[C.textDim,"— Aucune disponibilité"]].map(([col,lbl]) => (
+            {[[C.success,"🟢 Place régulière libre"],[C.warning,"⚡ Place occasionnelle libre"],[C.textDim,"— Aucune disponibilité"]].map(([col,lbl]) => (
               <div key={lbl} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:col }}><div style={{ width:10, height:10, borderRadius:"50%", background:col, flexShrink:0 }} />{lbl}</div>
             ))}
           </div>
@@ -1106,12 +1110,12 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
                   {/* Résumé dispo */}
                   {day.ctx.type === "samedi_milieu" ? (
                     <div style={{ fontSize:9, color:C.textDim, marginTop:4 }}>Vacances</div>
-                  ) : day.totalLibres + day.totalProv === 0 ? (
+                  ) : day.totalLibres + day.totalOcc === 0 ? (
                     <div style={{ fontSize:10, color:C.textDim, marginTop:4 }}>Complet</div>
                   ) : (
                     <div style={{ marginTop:6, display:"flex", flexDirection:"column", gap:3 }}>
                       {day.totalLibres > 0 && <div style={{ fontSize:11, fontWeight:700, color:C.success, background:C.success+"15", borderRadius:6, padding:"2px 6px" }}>🟢 {day.totalLibres}</div>}
-                      {day.totalProv > 0 && <div style={{ fontSize:11, fontWeight:700, color:C.warning, background:C.warning+"15", borderRadius:6, padding:"2px 6px" }}>💬 {day.totalProv}</div>}
+                      {day.totalOcc > 0 && <div style={{ fontSize:11, fontWeight:700, color:C.warning, background:C.warning+"15", borderRadius:6, padding:"2px 6px" }}>⚡ {day.totalOcc}</div>}
                     </div>
                   )}
                 </div>
@@ -1124,7 +1128,7 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
                     <div style={{ color:(FORFAITS[cr.mode]||{}).c||C.accent, fontWeight:600, fontSize:11 }}>{(FORFAITS[cr.mode]||{}).l||cr.mode}</div>
                     <div style={{ display:"flex", gap:4, marginTop:4, flexWrap:"wrap" }}>
                       {cr.dispo.placesLibres > 0 && <span style={{ fontSize:10, fontWeight:700, color:C.success, background:C.success+"15", borderRadius:4, padding:"1px 5px" }}>🟢 {cr.dispo.placesLibres}</span>}
-                      {cr.dispo.placesProvisSupp > 0 && <span style={{ fontSize:10, fontWeight:700, color:C.warning, background:C.warning+"15", borderRadius:4, padding:"1px 5px" }}>💬 {cr.dispo.placesProvisSupp}</span>}
+                      {cr.dispo.placesOccasionnelles > 0 && <span style={{ fontSize:10, fontWeight:700, color:C.warning, background:C.warning+"15", borderRadius:4, padding:"1px 5px" }}>⚡ {cr.dispo.placesOccasionnelles}</span>}
                     </div>
                   </div>
                 ))}
@@ -1160,8 +1164,8 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
               )}
               {totalJour.prov > 0 && (
                 <div style={{ background:C.warning+"15", border:`2px solid ${C.warning}44`, borderRadius:10, padding:"10px 18px", display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{ fontSize:18 }}>💬</span>
-                  <div><div style={{ fontSize:11, color:C.warning, fontWeight:700, textTransform:"uppercase" }}>Places provisoires libres</div><div style={{ fontSize:22, fontWeight:800, color:C.warning }}>{totalJour.prov}</div></div>
+                  <span style={{ fontSize:18 }}>⚡</span>
+                  <div><div style={{ fontSize:11, color:C.warning, fontWeight:700, textTransform:"uppercase" }}>Places occasionnelles libres</div><div style={{ fontSize:22, fontWeight:800, color:C.warning }}>{totalJour.prov}</div></div>
                 </div>
               )}
             </div>
