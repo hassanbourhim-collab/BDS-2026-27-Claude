@@ -244,12 +244,18 @@ const SlotDetailModal = ({ open, onClose, slot, eleves, affectations }) => {
 };
 
 // ═══ DASHBOARD ═══
-const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, presences, onNavigate }) => {
+const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements, presences, onNavigate, refresh }) => {
   const [classeOpen, setClasseOpen] = useState(false);
   const [retardsOpen, setRetardsOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [payEleve, setPayEleve] = useState("");
   const [slotDetail, setSlotDetail] = useState(null);
+  // ─── séance du jour ───
+  const [selectedCreneauId, setSelectedCreneauId] = useState(null);
+  const [localPresencesToday, setLocalPresencesToday] = useState([]);
+  const [noteModal, setNoteModal] = useState(null);
+  const [noteText, setNoteText] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
 
   const actifs = eleves.filter(e => e.actif).length;
   const smart = getSmartDay();
@@ -282,6 +288,80 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
   const totalRetard = retards.reduce((s, r) => s + r.solde, 0);
   const pieColors = ["#03A9F4","#9C27B0","#E91E63","#FF9800","#4CAF50","#00BCD4","#FF5722","#3F51B5"];
 
+  // ─── logique séance du jour ───
+  const slotDur = (slot) => slot ? Math.max(0.5, (new Date(`2000-01-01T${slot.heure_fin||"00:00"}`) - new Date(`2000-01-01T${slot.heure_debut||"00:00"}`)) / 3600000) : 1;
+  const dateToday = todayStr();
+  const nowHHMM = new Date().toTimeString().substring(0, 5);
+
+  const todayCreneaux = useMemo(() => {
+    const dow = new Date(dateToday + "T12:00:00").getDay();
+    const dn = JOURS_SEMAINE[dow];
+    const ctx = getDateContext(dateToday);
+    if (ctx.type === "samedi_milieu" || dow === 0) return [];
+    if (ctx.type === "vacances") return creneaux.filter(cr => cr.type_creneau === "stage" && cr.periode_vacances === ctx.vacance?.id && cr.semaine_vacances === ctx.semaine);
+    return creneaux.filter(cr => (cr.type_creneau||"regulier") === "regulier" && cr.jour === dn)
+      .sort((a,b) => (a.heure_debut||"").localeCompare(b.heure_debut||""));
+  }, [creneaux, dateToday]);
+
+  const autoCreneauId = useMemo(() => {
+    const inProgress = todayCreneaux.find(cr => (cr.heure_debut||"") <= nowHHMM && nowHHMM <= (cr.heure_fin||""));
+    if (inProgress) return inProgress.id;
+    const upcoming = todayCreneaux.filter(cr => (cr.heure_debut||"") > nowHHMM);
+    return upcoming[0]?.id || null;
+  }, [todayCreneaux, nowHHMM]);
+
+  const effectiveCreneauId = selectedCreneauId || autoCreneauId;
+  const selectedCreneau = todayCreneaux.find(cr => cr.id === effectiveCreneauId) || null;
+  const isEnCours = !!(selectedCreneau && (selectedCreneau.heure_debut||"") <= nowHHMM && nowHHMM <= (selectedCreneau.heure_fin||""));
+
+  const retardIds = useMemo(() => new Set(retards.map(r => String(r.id))), [retards]);
+
+  const slotStudents = useMemo(() => {
+    if (!selectedCreneau) return [];
+    return affectations.filter(a => {
+      if (a.creneau_id !== selectedCreneau.id || !a.actif) return false;
+      if (a.type_inscription === "occasionnel") {
+        const dates = a.dates_occasion ? a.dates_occasion.split(",").map(d => d.trim()) : [];
+        return dates.includes(dateToday);
+      }
+      return true;
+    }).map(a => {
+      const el = eleves.find(e => e.id === a.eleve_id);
+      if (!el) return null;
+      const pres = localPresencesToday.find(p => p.eleve_id === a.eleve_id && p.creneau_id === selectedCreneau.id && p.date_cours === dateToday);
+      return { ...el, type_inscription: a.type_inscription, affectation_id: a.id, presence: pres || null };
+    }).filter(Boolean).sort((a,b) => a.nom.localeCompare(b.nom));
+  }, [selectedCreneau, affectations, eleves, localPresencesToday, dateToday]);
+
+  const slotEffCount = slotStudents.filter(s => s.presence?.statut !== "absent_justifie" && s.presence?.statut !== "absent_non_justifie").length;
+
+  const reloadPresencesToday = useCallback(async () => {
+    const d = await api.get("presences", `date_cours=eq.${dateToday}`);
+    setLocalPresencesToday(d || []);
+  }, [dateToday]);
+
+  useEffect(() => { reloadPresencesToday(); }, [reloadPresencesToday]);
+
+  const setPresenceStatut = async (st, statut) => {
+    if (!selectedCreneau) return;
+    const heures = statut === "present" ? slotDur(selectedCreneau) : 0;
+    if (st.presence) {
+      await api.patch("presences", `id=eq.${st.presence.id}`, { statut, heures });
+    } else {
+      await api.post("presences", { eleve_id: st.id, creneau_id: selectedCreneau.id, date_cours: dateToday, statut, heures });
+    }
+    await reloadPresencesToday();
+  };
+
+  const saveNote = async () => {
+    if (!noteModal) return;
+    setNoteSaving(true);
+    await api.patch("eleves", `id=eq.${noteModal.id}`, { note_ped: noteText });
+    setNoteSaving(false);
+    setNoteModal(null);
+    if (refresh) refresh();
+  };
+
   const nextCourseSlots = useMemo(() => {
     const ctx = smart.ctx;
     const rel = ctx.type === "vacances"
@@ -306,20 +386,64 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
         <KPI icon="🚨" label="Retards" value={retards.length > 0 ? `${Math.abs(totalRetard).toFixed(0)}€` : "—"} sub={retards.length > 0 ? `${retards.length} famille(s)` : "Aucun"} color={C.danger} onClick={retards.length > 0 ? () => setRetardsOpen(true) : null} />
       </div>
 
-      {/* Prochain cours bandeau */}
-      <div style={{ background: C.surface, border: `2px solid ${smart.ctx.type==="vacances"?C.orange:C.accent}`, borderRadius: 16, padding: 18, marginBottom: 24, cursor: "pointer", boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }} onClick={() => onNavigate("planning", { date: smart.date })}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 24 }}>📋</span><span style={{ fontWeight: 700, fontSize: 16, color: C.text }}>{smart.isToday ? `Aujourd'hui — ${dayName}` : `Prochain cours — ${dayName}`}</span><Badge color={smart.ctx.type==="vacances"?C.orange:C.accent}>{ctxLabel}</Badge></div>
-          <span style={{ color: C.accent, fontSize: 13, fontWeight: 600 }}>Ouvrir le planning →</span>
+      {/* ── SÉANCE DU JOUR ── */}
+      <div style={{ background: C.surface, border: `2px solid ${isEnCours ? C.success : C.accent}44`, borderRadius: 16, padding: 20, marginBottom: 24, boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 22 }}>{isEnCours ? "🟢" : "📋"}</span>
+            <span style={{ fontWeight: 800, fontSize: 17, color: C.text }}>{isEnCours ? "Séance en cours" : "Prochaine séance"}</span>
+            {selectedCreneau && <Badge color={isEnCours ? C.success : C.accent}>{(selectedCreneau.heure_debut||"").substring(0,5)}–{(selectedCreneau.heure_fin||"").substring(0,5)}</Badge>}
+            {selectedCreneau && <Badge color={C.textMuted}>{FORFAITS[selectedCreneau.mode]?.l || selectedCreneau.mode}</Badge>}
+            {selectedCreneau && <Badge color={C.blue}>{slotEffCount}/{selectedCreneau.capacite||"?"}</Badge>}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {todayCreneaux.length > 1 && (
+              <select value={effectiveCreneauId||""} onChange={e => setSelectedCreneauId(e.target.value || null)}
+                style={{ padding: "6px 12px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13, fontWeight: 600 }}>
+                {todayCreneaux.map(cr => <option key={cr.id} value={cr.id}>{(cr.heure_debut||"").substring(0,5)}–{(cr.heure_fin||"").substring(0,5)} · {FORFAITS[cr.mode]?.l||cr.mode}</option>)}
+              </select>
+            )}
+            <span style={{ color: C.accent, fontSize: 12, fontWeight: 600, cursor: "pointer" }} onClick={() => onNavigate("planning", { date: dateToday })}>Planning →</span>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          {nextCourseSlots.length > 0 ? nextCourseSlots.map(sl => (
-            <div key={sl.id} style={{ background: C.surfaceLight, borderRadius: 10, padding: "10px 14px", border: `1px solid ${C.border}`, flex: "1 1 150px" }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: C.accent }}>{(sl.heure_debut||"").substring(0,5)}-{(sl.heure_fin||"").substring(0,5)}</div>
-              <div style={{ fontSize: 12, color: C.textMuted }}>{sl.students.length}/{sl.capacite} — {sl.mode}</div>
-            </div>
-          )) : <div style={{ fontSize: 13, color: C.textDim }}>Aucun créneau prévu</div>}
-        </div>
+
+        {/* Contenu */}
+        {todayCreneaux.length === 0 ? (
+          <div style={{ textAlign: "center", color: C.textDim, padding: "20px 0", fontSize: 14 }}>Aucune séance aujourd'hui</div>
+        ) : !selectedCreneau ? null : slotStudents.length === 0 ? (
+          <div style={{ textAlign: "center", color: C.textDim, padding: "16px 0", fontSize: 13 }}>Aucun élève inscrit pour cette séance</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {slotStudents.map(st => {
+              const isAJ = st.presence?.statut === "absent_justifie";
+              const isPresent = st.presence?.statut === "present";
+              const isANJ = st.presence?.statut === "absent_non_justifie";
+              const hasRetard = retardIds.has(String(st.id));
+              const hasNote = !!st.note_ped;
+              return (
+                <div key={st.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderRadius: 10, background: isAJ ? C.warning+"10" : C.surfaceLight, border: `1px solid ${isAJ ? C.warning+"55" : C.border}`, flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>{st.prenom} {st.nom}</span>
+                    <Badge color={st.type_inscription === "occasionnel" ? C.warning : C.blue}>{st.type_inscription === "occasionnel" ? "⚡ Occ." : "🔄 Abo."}</Badge>
+                    {hasRetard && <Badge color={C.danger}>💰 Retard</Badge>}
+                    {hasNote && <Badge color={C.purple} title={st.note_ped}>🧠</Badge>}
+                    {isAJ && <Badge color={C.warning}>❌ Abs. prévu</Badge>}
+                    {!st.presence && <Badge color={C.textDim}>⬜ Non marqué</Badge>}
+                    {isPresent && <Badge color={C.success}>✓ Présent</Badge>}
+                    {isANJ && <Badge color={C.danger}>✗ Absent</Badge>}
+                  </div>
+                  <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                    <button onClick={() => setPresenceStatut(st, "present")} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${isPresent ? C.success : C.border}`, background: isPresent ? C.success+"20" : "transparent", color: isPresent ? C.success : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✓</button>
+                    <button onClick={() => setPresenceStatut(st, "absent_non_justifie")} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${isANJ ? C.danger : C.border}`, background: isANJ ? C.danger+"20" : "transparent", color: isANJ ? C.danger : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✗</button>
+                    <button onClick={() => setPresenceStatut(st, "absent_justifie")} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${isAJ ? C.warning : C.border}`, background: isAJ ? C.warning+"20" : "transparent", color: isAJ ? C.warning : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>📅</button>
+                    <button onClick={() => { setNoteModal(st); setNoteText(st.note_ped || ""); }} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${C.border}`, background: "transparent", color: hasNote ? C.purple : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>🧠</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Charts */}
@@ -370,6 +494,14 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
       </Modal>
       <PaymentModal open={payOpen} onClose={() => { setPayOpen(false); setPayEleve(""); }} eleves={eleves} preselectedEleve={payEleve} refresh={() => onNavigate("dashboard")} />
       <SlotDetailModal open={!!slotDetail} onClose={() => setSlotDetail(null)} slot={slotDetail} eleves={eleves} affectations={affectations} refresh={() => onNavigate("dashboard")} />
+      <Modal open={!!noteModal} onClose={() => setNoteModal(null)} title={`🧠 Note — ${noteModal?.prenom||""} ${noteModal?.nom||""}`}>
+        <textarea value={noteText} onChange={e => setNoteText(e.target.value)} rows={4} placeholder="Remarque pédagogique..."
+          style={{ width: "100%", padding: "10px 14px", background: C.surface, border: `2px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
+          <Btn outline color={C.textMuted} onClick={() => setNoteModal(null)}>Annuler</Btn>
+          <Btn color={C.purple} onClick={saveNote} disabled={noteSaving}>{noteSaving ? "..." : "✓ Enregistrer"}</Btn>
+        </div>
+      </Modal>
     </div>
   );
 };
@@ -2195,7 +2327,7 @@ export default function App() {
     if (loading) return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 80, color: C.textMuted, fontSize: 16 }}>⏳ Chargement...</div>;
     if (error) return <div style={{ background: C.danger+"15", borderRadius: 16, padding: 30, textAlign: "center", border: `2px solid ${C.danger}44` }}><div style={{ color: C.danger, marginBottom: 12, fontWeight: 600 }}>{error}</div><Btn onClick={loadData}>Réessayer</Btn></div>;
     switch(page) {
-      case "dashboard": return <DashboardPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} onNavigate={nav} />;
+      case "dashboard": return <DashboardPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} onNavigate={nav} refresh={loadData} />;
       case "planning": return <PlanningPage creneaux={creneaux} affectations={affectations} eleves={eleves} presences={presences} suiviMensuel={suiviMensuel} refresh={loadData} initialDate={pageParams.date} />;
       case "eleves": return <ElevesPage eleves={eleves} creneaux={creneaux} affectations={affectations} suiviMensuel={suiviMensuel} paiements={paiements} presences={presences} refresh={loadData} initialAction={pageParams.action} initialOpenId={pageParams.openId} />;
       case "creneaux": return <CreneauxPage creneaux={creneaux} affectations={affectations} refresh={loadData} />;
