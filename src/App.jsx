@@ -11,7 +11,7 @@ const hdrs = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type"
 const api = {
   get: async (t, q = "") => { const r = await fetch(`${SB_URL}/rest/v1/${t}?${q}&order=id`, { headers: hdrs }); return r.ok ? r.json() : []; },
   post: async (t, d) => { const r = await fetch(`${SB_URL}/rest/v1/${t}`, { method: "POST", headers: hdrs, body: JSON.stringify(d) }); if (!r.ok) { const txt = await r.text(); console.error("[BDS] POST", t, r.status, txt); return null; } return r.json(); },
-  patch: async (t, filter, d) => { const r = await fetch(`${SB_URL}/rest/v1/${t}?${filter}`, { method: "PATCH", headers: hdrs, body: JSON.stringify(d) }); return r.ok ? r.json() : null; },
+  patch: async (t, filter, d) => { const r = await fetch(`${SB_URL}/rest/v1/${t}?${filter}`, { method: "PATCH", headers: hdrs, body: JSON.stringify(d) }); if (!r.ok) { const txt = await r.text(); console.error("[BDS] PATCH", t, r.status, txt); return null; } return r.json(); },
   del: async (t, filter) => { const r = await fetch(`${SB_URL}/rest/v1/${t}?${filter}`, { method: "DELETE", headers: hdrs }); return r.ok; },
 };
 
@@ -212,8 +212,16 @@ const PaymentModal = ({ open, onClose, eleves, preselectedEleve, refresh }) => {
 // ═══ SLOT DETAIL MODAL (vue rapide — Tableau de bord) ═══
 const SlotDetailModal = ({ open, onClose, slot, eleves, affectations }) => {
   if (!open || !slot) return null;
+  const today = todayStr();
   const students = affectations
-    .filter(a => a.creneau_id === slot.id && a.actif)
+    .filter(a => {
+      if (a.creneau_id !== slot.id || !a.actif) return false;
+      if (a.type_inscription === "occasionnel") {
+        const dates = a.dates_occasion ? a.dates_occasion.split(",").map(d => d.trim()) : [];
+        return dates.includes(today);
+      }
+      return true;
+    })
     .map(a => eleves.find(e => e.id === a.eleve_id))
     .filter(Boolean)
     .sort((a, b) => a.nom.localeCompare(b.nom));
@@ -419,7 +427,7 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences: initialPresen
         const pres = localPresences.find(p => p.eleve_id === a.eleve_id && p.creneau_id === cr.id && p.date_cours === dateStr);
         return { ...el, type_inscription: a.type_inscription, affectation_id: a.id, dates_occasion: a.dates_occasion, presence: pres || null };
       }).filter(Boolean);
-      const effCount = students.filter(s => s.presence?.statut !== "absent_justifie").length;
+      const effCount = students.filter(s => s.presence?.statut !== "absent_justifie" && s.presence?.statut !== "absent_non_justifie").length;
       const pct = cr.capacite ? effCount / cr.capacite : 0;
       return { ...cr, students, effCount, pct };
     }).sort((a, b) => (a.heure_debut || "").localeCompare(b.heure_debut || ""));
@@ -446,23 +454,33 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences: initialPresen
     if (!addEleve || !selectedSlot || saving) return;
     setSaving(true);
     const { slot, dateStr } = selectedSlot;
-    const eleveId = Number(addEleve);
-    const reactivated = await api.patch("affectations_creneaux",
-      `eleve_id=eq.${eleveId}&creneau_id=eq.${slot.id}&actif=eq.false`,
-      { actif: true, type_inscription: addType });
-    if (!reactivated || reactivated.length === 0) {
-      const created = await api.post("affectations_creneaux", { eleve_id: eleveId, creneau_id: slot.id, type_inscription: addType, actif: true });
-      if (!created) { setSaving(false); return; }
+    const eleveId = addEleve; // pas de Number() — l'ID est déjà au bon type depuis Supabase
+    console.log("[inscribe] addEleve:", addEleve, "→ eleveId:", eleveId, "type:", typeof eleveId);
+    console.log("[inscribe] creneau_id:", slot.id, "addType:", addType, "dateStr:", dateStr);
+    try {
+      const reactivated = await api.patch("affectations_creneaux",
+        `eleve_id=eq.${eleveId}&creneau_id=eq.${slot.id}&actif=eq.false`,
+        { actif: true, type_inscription: addType });
+      console.log("[inscribe] patch réactivation:", reactivated);
+      if (!reactivated || reactivated.length === 0) {
+        const created = await api.post("affectations_creneaux", { eleve_id: eleveId, creneau_id: slot.id, type_inscription: addType, actif: true });
+        console.log("[inscribe] post création:", created);
+        if (!created) { console.error("[inscribe] échec création — inscription annulée"); return; }
+      }
+      if (addType === "occasionnel") {
+        const patched = await api.patch("affectations_creneaux",
+          `eleve_id=eq.${eleveId}&creneau_id=eq.${slot.id}&actif=eq.true`,
+          { dates_occasion: dateStr });
+        console.log("[inscribe] patch dates_occasion:", patched);
+      }
+      setAddEleve("");
+      setAddType("abonne");
+      console.log("[inscribe] refresh...");
+      await refresh();
+      console.log("[inscribe] ✓ terminé");
+    } finally {
+      setSaving(false);
     }
-    if (addType === "occasionnel") {
-      await api.patch("affectations_creneaux",
-        `eleve_id=eq.${eleveId}&creneau_id=eq.${slot.id}&actif=eq.true`,
-        { dates_occasion: dateStr });
-    }
-    setAddEleve("");
-    setAddType("abonne");
-    setSaving(false);
-    await refresh();
   };
 
   const togglePresence = async (st, dateStr) => {
@@ -551,8 +569,8 @@ const PlanningPage = ({ creneaux, affectations, eleves, presences: initialPresen
                         onClick={() => { setSelectedSlot({ slot, dateStr }); setAddEleve(""); setAddType("abonne"); }}
                         style={{ background: isSelected ? col + "22" : C.surface, border: `2px solid ${col}${isSelected ? "" : "77"}`, borderRadius: 8, padding: "8px 10px", marginBottom: 6, cursor: "pointer", transition: "all 0.15s" }}>
                         <div style={{ fontSize: 12, fontWeight: 700, color: C.text }}>{(slot.heure_debut || "").substring(0, 5)}–{(slot.heure_fin || "").substring(0, 5)}</div>
-                        <div style={{ fontSize: 11, color: col, fontWeight: 600, marginTop: 2 }}>{slot.students.length}/{slot.capacite || "?"}</div>
-                        {slot.students.some(s => s.presence) && <div style={{ fontSize: 10, color: C.success, marginTop: 1 }}>✓ appel</div>}
+                        <div style={{ fontSize: 11, color: col, fontWeight: 600, marginTop: 2 }}>{slot.effCount}/{slot.capacite || "?"}</div>
+                        {slot.students.some(s => s.presence?.statut === "present" || s.presence?.statut === "absent_non_justifie") && <div style={{ fontSize: 10, color: C.success, marginTop: 1 }}>✓ appel</div>}
                       </div>
                     );
                   })}
@@ -961,7 +979,6 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
   const [selectedDate, setSelectedDate] = useState(getSmartDay().date);
   const [viewMode, setViewMode] = useState("semaine"); // "jour" | "semaine"
   const [filterMode, setFilterMode] = useState("tous"); // "tous" | "regulier" | "provisoire"
-  const [inscriptionSlot, setInscriptionSlot] = useState(null);
 
   // Calcul des disponibilités pour un créneau à une date donnée
   // RÈGLE : placesLibres = capacité - abonnés (pas les occasionnels)
@@ -1176,7 +1193,6 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
                         <span style={{ fontWeight:700, fontSize:14, color:cr.dispo.total>0?C.success:C.textDim }}>
                           {cr.dispo.total} place{cr.dispo.total>1?"s":""} dispo
                         </span>
-                        <Btn small color={C.pink} onClick={() => setInscriptionSlot(cr)}>👤 Inscrire</Btn>
                       </div>
                     </div>
 
@@ -1201,16 +1217,38 @@ const DisponibilitesPage = ({ creneaux, affectations, eleves, presences, refresh
         );
       })()}
 
-      {/* Modal inscription prospect */}
-      <InscriptionProspectModal
-        open={!!inscriptionSlot}
-        onClose={() => setInscriptionSlot(null)}
-        slot={inscriptionSlot}
-        dateStr={selectedDate}
-        eleves={eleves}
-        affectations={affectations}
-        refresh={refresh}
-      />
+    </div>
+  );
+};
+
+// ═══ PAIEMENTS ═══
+const PaiementsPage = ({ eleves, paiements, refresh }) => {
+  const [payOpen, setPayOpen] = useState(false);
+  const sorted = useMemo(() => [...paiements].sort((a,b) => new Date(b.date_paiement)-new Date(a.date_paiement)), [paiements]);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}><span style={{ fontSize: 26 }}>💳</span><h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0 }}>Paiements</h2><Badge color={C.accent}>{paiements.length}</Badge></div>
+        <Btn onClick={() => setPayOpen(true)} color={C.success}>+ Nouveau règlement</Btn>
+      </div>
+      {sorted.length === 0
+        ? <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 50, textAlign: "center" }}><div style={{ fontSize: 50, marginBottom: 12 }}>💰</div><div style={{ color: C.textMuted }}>Aucun paiement</div></div>
+        : <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr style={{ borderBottom: `2px solid ${C.border}`, background: C.blue+"15" }}>{["Date","Élève","Montant","Mode","Mois","Note"].map((h,i) => <th key={i} style={{ padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 700, color: C.blue, textTransform: "uppercase" }}>{h}</th>)}</tr></thead>
+              <tbody>{sorted.map(p => { const el = eleves.find(e => e.id===p.eleve_id); return (
+                <tr key={p.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "10px 14px", fontSize: 13, color: C.textMuted }}>{new Date(p.date_paiement).toLocaleDateString("fr-FR")}</td>
+                  <td style={{ padding: "10px 14px", fontSize: 14, fontWeight: 700, color: C.text }}>{el ? `${el.prenom} ${el.nom}` : p.eleve_id}</td>
+                  <td style={{ padding: "10px 14px", fontSize: 16, fontWeight: 800, color: C.success }}>{parseFloat(p.montant).toFixed(0)}€</td>
+                  <td style={{ padding: "10px 14px" }}><Badge color={C.textMuted}>{p.mode_paiement}</Badge></td>
+                  <td style={{ padding: "10px 14px", fontSize: 13, color: C.textMuted }}>{p.mois_concerne||"—"}</td>
+                  <td style={{ padding: "10px 14px", fontSize: 13, color: C.textDim }}>{p.commentaire||"—"}</td>
+                </tr>
+              ); })}</tbody>
+            </table>
+          </div>}
+      <PaymentModal open={payOpen} onClose={() => setPayOpen(false)} eleves={eleves} preselectedEleve="" refresh={refresh} />
     </div>
   );
 };
