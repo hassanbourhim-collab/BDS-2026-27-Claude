@@ -325,7 +325,7 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
   const sessionSlots = findNextSession.slots;
   const sessionDate  = findNextSession.date;
   const effectiveCreneauId = selectedCreneauId || findNextSession.autoId;
-  const selectedCreneau = sessionSlots.find(cr => cr.id === effectiveCreneauId) || null;
+  const selectedCreneau = sessionSlots.find(cr => String(cr.id) === String(effectiveCreneauId)) || null;
   const isEnCours = !!(selectedCreneau && sessionDate === dateToday
     && (selectedCreneau.heure_debut||"") <= nowHHMM && nowHHMM <= (selectedCreneau.heure_fin||""));
 
