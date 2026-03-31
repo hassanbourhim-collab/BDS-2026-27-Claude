@@ -359,6 +359,12 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
 
   const setPresenceStatut = async (st, statut) => {
     if (!selectedCreneau) return;
+    // Reclique sur le statut actif → annuler et revenir à "non marqué"
+    if (st.presence?.statut === statut) {
+      await api.del("presences", `id=eq.${st.presence.id}`);
+      await reloadPresencesToday();
+      return;
+    }
     const heures = statut === "present" ? slotDur(selectedCreneau) : 0;
     if (st.presence) {
       await api.patch("presences", `id=eq.${st.presence.id}`, { statut, heures });
@@ -449,10 +455,10 @@ const DashboardPage = ({ eleves, creneaux, affectations, suiviMensuel, paiements
                     {isANJ && <Badge color={C.danger}>✗ Absent</Badge>}
                   </div>
                   <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-                    <button onClick={() => setPresenceStatut(st, "present")} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${isPresent ? C.success : C.border}`, background: isPresent ? C.success+"20" : "transparent", color: isPresent ? C.success : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✓</button>
-                    <button onClick={() => setPresenceStatut(st, "absent_non_justifie")} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${isANJ ? C.danger : C.border}`, background: isANJ ? C.danger+"20" : "transparent", color: isANJ ? C.danger : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✗</button>
-                    <button onClick={() => setPresenceStatut(st, "absent_justifie")} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${isAJ ? C.warning : C.border}`, background: isAJ ? C.warning+"20" : "transparent", color: isAJ ? C.warning : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>📅</button>
-                    <button onClick={() => { setNoteModal(st); setNoteText(st.note_ped || ""); }} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${C.border}`, background: "transparent", color: hasNote ? C.purple : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>🧠</button>
+                    <button title={isPresent ? "Annuler (→ non marqué)" : "Marquer présent"} onClick={() => setPresenceStatut(st, "present")} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${isPresent ? C.success : C.border}`, background: isPresent ? C.success+"20" : "transparent", color: isPresent ? C.success : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✓ Présent</button>
+                    <button title={isANJ ? "Annuler (→ non marqué)" : "Marquer absent"} onClick={() => setPresenceStatut(st, "absent_non_justifie")} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${isANJ ? C.danger : C.border}`, background: isANJ ? C.danger+"20" : "transparent", color: isANJ ? C.danger : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✗ Absent</button>
+                    <button title={isAJ ? "Annuler (→ non marqué)" : "Marquer absent prévu"} onClick={() => setPresenceStatut(st, "absent_justifie")} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${isAJ ? C.warning : C.border}`, background: isAJ ? C.warning+"20" : "transparent", color: isAJ ? C.warning : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>📅 Prévu</button>
+                    <button title={hasNote ? "Modifier la note" : "Ajouter une note"} onClick={() => { setNoteModal(st); setNoteText(st.note_ped || ""); }} style={{ padding: "5px 10px", borderRadius: 6, border: `2px solid ${hasNote ? C.purple : C.border}`, background: "transparent", color: hasNote ? C.purple : C.textMuted, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>🧠 Note</button>
                   </div>
                 </div>
               );
